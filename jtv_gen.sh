@@ -307,7 +307,7 @@ CONFIG_BASENAME=$(basename "$CONFIG_FILE" .conf)
 OUTPUT_DIR="output/${CONFIG_BASENAME}"
 TEMP_DIR="temp"
 LOG_FILE="tv_generation.log"
-# Output filename will be set after parsing H.264 option
+# Output filename for MPEG-2 TS format
 FINAL_OUTPUT=""
 
 # Initialize log file
@@ -316,6 +316,40 @@ FINAL_OUTPUT=""
 # ============================================================================
 # CORE FUNCTIONS
 # ============================================================================
+
+# Generate high-quality logo image with corner markers for Amatsukaze detection
+generate_logo_image() {
+    local logo_text="$1"
+    local logo_size="$2"
+    local output_path="$3"
+    local logo_opacity="${4:-0.75}"
+    local image_width="${5:-200}"
+    local image_height="${6:-80}"
+    local corner_size="${7:-4}"
+    
+    log "${BLUE}Generating logo image: $output_path${NC}"
+    
+    # Generate transparent PNG logo with corner markers - Using colorkey method
+    ffmpeg -y \
+        -f lavfi -i "color=black:size=${image_width}x${image_height}:rate=1:duration=1" \
+        -vf "format=rgba,
+             colorkey=black:0.01:0.1,
+             drawbox=x=0:y=0:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
+             drawbox=x=w-$corner_size:y=0:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
+             drawbox=x=0:y=h-$corner_size:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
+             drawbox=x=w-$corner_size:y=h-$corner_size:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
+             drawtext=fontsize=$logo_size:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2" \
+        -frames:v 1 -pix_fmt rgba -update 1 \
+        "$output_path" 2>> "$LOG_FILE"
+    
+    if [[ -f "$output_path" ]]; then
+        log "${GREEN}✓ Logo image generated successfully: $output_path${NC}"
+        return 0
+    else
+        log "${RED}Error: Failed to generate logo image${NC}"
+        return 1
+    fi
+}
 
 # Load configuration
 load_config() {
@@ -533,11 +567,6 @@ preview_segments() {
     for segment_data in "${SEGMENTS[@]}"; do
         IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
 
-        # Skip RecMargin segments for display (but keep them in processing)
-        if [[ "$type" == "RecMargin" ]]; then
-            continue
-        fi
-
         local start_timecode
         start_timecode=$(frame_to_timecode "$start_frame")
         local end_timecode
@@ -574,36 +603,98 @@ preview_segments() {
     esac
 }
 
-# Generate main program segment
+# Generate main program segment with enhanced logo for Amatsukaze detection
 generate_main_segment() {
     local segment_name=$1
     local duration=$2
     local output_file=$3
 
-    # Main segment generation (log handled by caller)
-
-    # Create logo overlay (simple text as transparent logo)
-    local logo_text="JTV-Gen"
-
-    ffmpeg -y \
-        -f lavfi -i "testsrc2=size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
-        -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
-        -filter_complex "
-            [0:v]drawtext=fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.7:boxborderw=10,drawtext=fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.7:boxborderw=10,drawtext=fontsize=30:fontcolor=white@${CONFIG[MAIN_LOGO_OPACITY]}:text='$logo_text':x=w-text_w-50:y=50[v];
-            [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
-        " \
-        -map "[v]" -map "[a]" \
-        -c:v "${CONFIG[VIDEO_CODEC]}" \
-        -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
-        -max_muxing_queue_size 1024 \
-        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
-        -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
-        -profile:v main -level:v high -g 15 -keyint_min 3 \
-        -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
-        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
-        -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-        "$output_file" 2>> "$LOG_FILE"
+    # Main segment generation with Amatsukaze-optimized logo for stable detection
+    
+    # Logo configuration from config file with Amatsukaze optimizations
+    local logo_text="${CONFIG[LOGO_TEXT]:-JTV-Gen}"
+    local logo_size="${CONFIG[LOGO_SIZE]:-36}"
+    local logo_pos_x="${CONFIG[LOGO_POSITION_X]:-w-text_w-40}"
+    local logo_pos_y="${CONFIG[LOGO_POSITION_Y]:-40}"
+    local logo_box_enabled="${CONFIG[LOGO_BOX_ENABLED]:-1}"
+    local logo_box_color="${CONFIG[LOGO_BOX_COLOR]:-black@0.8}"
+    local logo_box_border="${CONFIG[LOGO_BOX_BORDER]:-5}"
+    
+    # Amatsukaze stability mode - use solid background for stable logo detection
+    local amatsukaze_mode="${CONFIG[AMATSUKAZE_OPTIMIZED_MODE]:-true}"
+    local logo_stability="${CONFIG[LOGO_STABILITY_MODE]:-enhanced}"
+    
+    # Check logo method - image overlay or text drawtext
+    local logo_method="${CONFIG[LOGO_METHOD]:-image}"
+    
+    # Debug output for troubleshooting
+    log "${YELLOW}DEBUG: logo_method=$logo_method, amatsukaze_mode=$amatsukaze_mode, logo_stability=$logo_stability${NC}"
+    
+    if [[ "$logo_method" == "image" ]]; then
+        log "${GREEN}DEBUG: Using IMAGE OVERLAY method for logo generation${NC}"
+        # Image overlay method for high-quality logo with Amatsukaze optimization
+        local bg_color="${CONFIG[AMATSUKAZE_BG_COLOR]:-gray}"
+        local deinterlace_filter=""
+        local logo_image_path="$TEMP_DIR/logo.png"
+        
+        # Add deinterlace filter if enabled (denoise disabled for image quality)
+        if [[ "${CONFIG[AMATSUKAZE_DEINTERLACE]:-true}" == "true" ]]; then
+            deinterlace_filter="yadif=mode=1:parity=auto:deint=interlaced,"
+        fi
+        
+        # Generate logo image if not exists
+        if [[ ! -f "$logo_image_path" ]]; then
+            generate_logo_image "$logo_text" "$logo_size" "$logo_image_path" "0.75" "200" "80" "4"
+        fi
+        
+        ffmpeg -y \
+            -f lavfi -i "color=$bg_color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
+            -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
+            -i "$logo_image_path" \
+            -filter_complex "
+                [0:v]${deinterlace_filter}drawtext=fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
+                drawtext=fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10[bg];
+                [bg][2:v]overlay=W-w-40:40:format=auto[v];
+                [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
+            " \
+            -map "[v]" -map "[a]" \
+            -c:v "${CONFIG[VIDEO_CODEC]}" \
+            -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
+            -max_muxing_queue_size 1024 \
+            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
+            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
+            -profile:v main -level:v high -g 15 -keyint_min 3 \
+            -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
+            -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+            -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
+            -f mpegts "$output_file" 2>> "$LOG_FILE"
+    else
+        log "${RED}DEBUG: Using STANDARD DRAWTEXT method (fallback mode)${NC}"
+        # Standard mode - original testsrc2 pattern for backward compatibility
+        ffmpeg -y \
+            -f lavfi -i "testsrc2=size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
+            -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
+            -filter_complex "
+                [0:v]drawtext=fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.7:boxborderw=10,
+                drawtext=fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.7:boxborderw=10,
+                drawtext=fontsize=$logo_size:fontcolor=white@${CONFIG[MAIN_LOGO_OPACITY]:-"0.8"}:text='$logo_text':x=$logo_pos_x:y=$logo_pos_y:box=$logo_box_enabled:boxcolor=$logo_box_color:boxborderw=$logo_box_border,
+                drawtext=fontsize=24:fontcolor=white@0.9:text='●':x=$logo_pos_x+120:y=$logo_pos_y+5:box=1:boxcolor=red@0.7:boxborderw=3[v];
+                [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
+            " \
+            -map "[v]" -map "[a]" \
+            -c:v "${CONFIG[VIDEO_CODEC]}" \
+            -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
+            -max_muxing_queue_size 1024 \
+            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
+            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
+            -profile:v main -level:v high -g 15 -keyint_min 3 \
+            -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
+            -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+            -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
+            -f mpegts "$output_file" 2>> "$LOG_FILE"
+    fi
 }
 
 # Generate CM segment with silence padding and color inversion
@@ -645,7 +736,7 @@ generate_cm_segment() {
             " \
             -map "[v]" -map "[a]" \
             -c:v "${CONFIG[VIDEO_CODEC]}" \
-        -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
+        -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
         -max_muxing_queue_size 1024 \
             -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
             -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
@@ -654,7 +745,7 @@ generate_cm_segment() {
             -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
                 -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-            "$output_file" 2>> "$LOG_FILE"
+            -f mpegts "$output_file" 2>> "$LOG_FILE"
     else
         # Long CM - with silence padding and color inversion using single FFmpeg command
         # Structure: silence(inverted) -> content(normal) -> silence(inverted)
@@ -676,7 +767,7 @@ generate_cm_segment() {
             " \
             -map "[v]" -map "[a]" \
             -c:v "${CONFIG[VIDEO_CODEC]}" \
-            -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
+            -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
             -max_muxing_queue_size 1024 \
             -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
             -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
@@ -685,7 +776,7 @@ generate_cm_segment() {
             -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
             -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-            "$output_file" 2>> "$LOG_FILE"
+            -f mpegts "$output_file" 2>> "$LOG_FILE"
     fi
 }
 
@@ -747,7 +838,7 @@ process_segment_async() {
     local time_duration
     time_duration=$(calculate_duration "$start_frame" $((end_frame + 1)))
     local output_file
-    output_file="$TEMP_DIR/segment_$(printf "%03d" "$segment_index")_${name}.mp4"
+    output_file="$TEMP_DIR/segment_$(printf "%03d" "$segment_index")_${name}.ts"
 
     [[ "$DEBUG" == true ]] && log "${YELLOW}Background processing segment: $type,$name,$start_frame,$end_frame${NC}"
 
@@ -794,16 +885,30 @@ generate_segments() {
     max_jobs=$(calculate_max_jobs)
     log "${BLUE}Using $max_jobs parallel jobs (CPU cores: $(nproc 2>/dev/null || echo "unknown"))${NC}"
 
+    # Preserve original order BEFORE sorting
+    local original_segments=("${SEGMENTS[@]}")
+    declare -A original_order_map
+    local original_index=0
+    for segment_data in "${original_segments[@]}"; do
+        IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+        if [[ "$type" != "RecMargin" ]]; then
+            original_order_map["$segment_data"]="$original_index"
+        fi
+        original_index=$((original_index + 1))
+    done
+
     # Sort segments by frame count (heaviest first)
     sort_segments_by_frames
 
-    # Count total segments (excluding RecMargin)
+    # Count total segments (excluding RecMargin) and get original indices
     local total_segments=0
     local segment_list=()
+    local original_indices=()
     for segment_data in "${SEGMENTS[@]}"; do
         IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
         if [[ "$type" != "RecMargin" ]]; then
             segment_list+=("$segment_data")
+            original_indices+=("${original_order_map["$segment_data"]}")
             total_segments=$((total_segments + 1))
         fi
     done
@@ -820,7 +925,9 @@ generate_segments() {
     local segment_indices=()
 
     # Process segments
-    for segment_data in "${segment_list[@]}"; do
+    for i in "${!segment_list[@]}"; do
+        local segment_data="${segment_list[$i]}"
+        local original_segment_index="${original_indices[$i]}"
         # Wait if we've reached max jobs
         while [[ $active_jobs -ge $max_jobs ]]; do
             # Check for completed jobs
@@ -870,10 +977,10 @@ generate_segments() {
         done
 
         # Start new background job
-        process_segment_async "$segment_data" "$segment_index" "$total_segments" &
+        process_segment_async "$segment_data" "$original_segment_index" "$total_segments" &
         local bg_pid=$!
         pids+=("$bg_pid")
-        segment_indices+=("$segment_index")
+        segment_indices+=("$original_segment_index")
         active_jobs=$((active_jobs + 1))
         segment_index=$((segment_index + 1))
 
@@ -941,9 +1048,15 @@ concatenate_segments() {
     local concat_file="$TEMP_DIR/concat_list.txt"
     : > "$concat_file"
 
-    for file in "$TEMP_DIR"/segment_*.mp4; do
-        if [[ -f "$file" ]]; then
-            echo "file '../$file'" >> "$concat_file"
+    # Sort segment files by their numeric index to maintain config order
+    for i in $(seq -f "%03g" 0 999); do
+        local file="$TEMP_DIR/segment_${i}_"*.ts
+        if compgen -G "$file" > /dev/null; then
+            for matched_file in $file; do
+                if [[ -f "$matched_file" ]]; then
+                    echo "file '../$matched_file'" >> "$concat_file"
+                fi
+            done
         fi
     done
 
@@ -1598,10 +1711,6 @@ check_dependencies() {
         ffmpeg_issues+=("FFmpeg basic video generation not working")
     fi
 
-    # Check for H.264 support (warn if not available)
-    if ! ffmpeg -codecs 2>/dev/null | grep -qi "264"; then
-        log "${YELLOW}Warning: H.264 codec may not be available, --h264 option may not work${NC}"
-    fi
 
     # Essential capability warnings (non-fatal)
     local warnings=()
@@ -1661,6 +1770,16 @@ main() {
 
     # Process
     load_config
+    
+    # Pre-generate logo if using image method
+    if [[ "${CONFIG[LOGO_METHOD]:-image}" == "image" ]]; then
+        log "${BLUE}Pre-generating logo image for overlay method${NC}"
+        mkdir -p "$TEMP_DIR"
+        local logo_text="${CONFIG[LOGO_TEXT]:-JTV-Gen}"
+        local logo_size="${CONFIG[LOGO_SIZE]:-36}"
+        generate_logo_image "$logo_text" "$logo_size" "$TEMP_DIR/logo.png" "0.75" "200" "80" "4"
+    fi
+    
     generate_metadata_files
     preview_segments
     generate_segments
