@@ -650,61 +650,28 @@ generate_cm_segment() {
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             "$output_file" 2>> "$LOG_FILE"
     else
-        # Long CM - with silence padding and color inversion
+        # Long CM - with silence padding and color inversion using single FFmpeg command
         # Structure: silence(inverted) -> content(normal) -> silence(inverted)
-        local temp_content="${output_file%.mp4}_content.mp4"
-        local temp_silence="${output_file%.mp4}_silence.mp4"
-        
-        # Generate content segment
-        ffmpeg -y \
-            -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$content_dur" \
-            -f lavfi -i "sine=frequency=800:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$content_dur,aformat=channel_layouts=stereo" \
-            -filter_complex "
-                [0:v]drawtext=fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v];
-                [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
-            " \
-            -map "[v]" -map "[a]" \
-            -c:v "${CONFIG[VIDEO_CODEC]}" -profile:v "${CONFIG[VIDEO_PROFILE]}" -level "${CONFIG[VIDEO_LEVEL]}" \
-        -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
-        -max_muxing_queue_size 1024 \
-            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect "${CONFIG[VIDEO_ASPECT]}" \
-            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
-            -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
-                -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
-            -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-            "$temp_content" 2>> "$LOG_FILE"
-        
-        # Generate silence segment (inverted color)
         ffmpeg -y \
             -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
             -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
+            -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$content_dur" \
+            -f lavfi -i "sine=frequency=800:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$content_dur,aformat=channel_layouts=stereo" \
+            -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
+            -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
             -filter_complex "
-                [0:v]negate,drawtext=fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v];
-                [1:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a]
+                [0:v]negate,drawtext=fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
+                [1:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence1];
+                [2:v]drawtext=fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
+                [3:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a_content];
+                [4:v]negate,drawtext=fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
+                [5:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence2];
+                [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[v][a]
             " \
             -map "[v]" -map "[a]" \
             -c:v "${CONFIG[VIDEO_CODEC]}" -profile:v "${CONFIG[VIDEO_PROFILE]}" -level "${CONFIG[VIDEO_LEVEL]}" \
-        -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
-        -max_muxing_queue_size 1024 \
-            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect "${CONFIG[VIDEO_ASPECT]}" \
-            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
-            -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
-                -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
-            -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-            "$temp_silence" 2>> "$LOG_FILE"
-        
-        # Create concat list and combine
-        echo "file '$(basename "$temp_silence")'" > "${output_file%.mp4}_list.txt"
-        echo "file '$(basename "$temp_content")'" >> "${output_file%.mp4}_list.txt"
-        echo "file '$(basename "$temp_silence")'" >> "${output_file%.mp4}_list.txt"
-        
-        # Concatenate segments
-        ffmpeg -y -f concat -safe 0 -i "${output_file%.mp4}_list.txt" \
-            -c:v "${CONFIG[VIDEO_CODEC]}" -profile:v "${CONFIG[VIDEO_PROFILE]}" -level "${CONFIG[VIDEO_LEVEL]}" \
-        -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
-        -max_muxing_queue_size 1024 \
+            -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
+            -max_muxing_queue_size 1024 \
             -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect "${CONFIG[VIDEO_ASPECT]}" \
             -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
             -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
@@ -712,9 +679,6 @@ generate_cm_segment() {
             -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             "$output_file" 2>> "$LOG_FILE"
-        
-        # Cleanup temporary files
-        rm -f "$temp_content" "$temp_silence" "${output_file%.mp4}_list.txt"
     fi
 }
 
@@ -806,12 +770,10 @@ concatenate_segments() {
     done
     
     
-    # Concatenate and convert to MPEG-TS
+    # Concatenate using stream copy (no re-encoding)
     ffmpeg -y \
         -f concat -safe 0 -i "$concat_file" \
-        -c:v mpeg2video -b:v 8M \
-        -c:a aac -b:a 256k -ar 48000 -ac 2 \
-        -strict experimental \
+        -c copy \
         -mpegts_service_id "${CONFIG[BROADCAST_SERVICE_ID]}" \
         -mpegts_transport_stream_id "${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}" \
         -metadata service_provider="${CONFIG[BROADCAST_SERVICE_PROVIDER]}" \
@@ -1051,31 +1013,31 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pat.bin\" --pid 0 --replace"
         fi
         
-        # CAT injection (PID 1) - new PID creation
+        # CAT injection (PID 1) - based on terrestrial TV analysis: ~10 seconds
         if [[ -f "$tables_dir/cat.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/cat.bin\" --pid 1 --inter-packet 300"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/cat.bin\" --pid 1 --inter-packet 2500"
         fi
         
-        # NIT injection (PID 16) - new PID creation
+        # NIT injection (PID 16) - based on terrestrial TV analysis: ~1 second
         if [[ -f "$tables_dir/nit.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet 100"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet 250"
         fi
         
-        # SDT injection (PID 17) - service information
+        # SDT injection (PID 17) - based on terrestrial TV analysis: ~2 seconds
         if [[ -f "$tables_dir/sdt.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/sdt.bin\" --pid 17 --replace"
         fi
         
-        # EIT injection (PID 18) - event information (now with proper foundation)
+        # EIT injection (PID 18) - based on terrestrial TV analysis: ~1 second
         if [[ -f "$tables_dir/eit.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 50"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 250"
         fi
         
-        # TOT/TDT injection (PID 20) - time information
+        # TOT/TDT injection (PID 20) - based on terrestrial TV analysis: ~10 seconds
         if [[ -f "$tables_dir/tot.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 150"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 2500"
         elif [[ -f "$tables_dir/tdt.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tdt.bin\" --pid 20 --inter-packet 150"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tdt.bin\" --pid 20 --inter-packet 2500"
         fi
         
         # PMT injection (PID 257) - program definition
@@ -1083,7 +1045,7 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pmt.bin\" --pid 257 --replace"
         fi
         
-        tsp_cmd="$tsp_cmd -P continuity --fix -P regulate --bitrate 15000000 -O file \"$output_file\""
+        tsp_cmd="$tsp_cmd -P continuity --fix -O file \"$output_file\""
         
         log "${BLUE}Executing: $tsp_cmd${NC}"
         eval "$tsp_cmd" 2>&1 | tee -a "$LOG_FILE"
@@ -1103,31 +1065,31 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pat.bin\" --pid 0 --replace"
         fi
         
-        # CAT injection (PID 1)
+        # CAT injection (PID 1) - based on terrestrial TV analysis: ~10 seconds
         if [[ -f "$tables_dir/cat.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/cat.bin\" --pid 1 --inter-packet 200"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/cat.bin\" --pid 1 --inter-packet 2500"
         fi
         
-        # NIT injection (PID 16)
+        # NIT injection (PID 16) - based on terrestrial TV analysis: ~1 second
         if [[ -f "$tables_dir/nit.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet 50"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet 250"
         fi
         
-        # SDT injection (PID 17)
+        # SDT injection (PID 17) - based on terrestrial TV analysis: ~2 seconds
         if [[ -f "$tables_dir/sdt.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/sdt.bin\" --pid 17 --replace"
         fi
         
-        # EIT injection (PID 18)
+        # EIT injection (PID 18) - based on terrestrial TV analysis: ~1 second
         if [[ -f "$tables_dir/eit.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 30"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 250"
         fi
         
-        # TOT/TDT injection (PID 20)
+        # TOT/TDT injection (PID 20) - based on terrestrial TV analysis: ~10 seconds
         if [[ -f "$tables_dir/tot.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 200"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 2500"
         elif [[ -f "$tables_dir/tdt.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tdt.bin\" --pid 20 --inter-packet 200"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tdt.bin\" --pid 20 --inter-packet 2500"
         fi
         
         # PMT injection (PID 257)
@@ -1135,7 +1097,7 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pmt.bin\" --pid 257 --replace"
         fi
         
-        tsp_cmd="$tsp_cmd -P continuity --fix -P regulate --bitrate 15000000 -O file \"$output_file\""
+        tsp_cmd="$tsp_cmd -P continuity --fix -O file \"$output_file\""
         
         log "${BLUE}Executing: $tsp_cmd${NC}"
         eval "$tsp_cmd" 2>&1 | tee -a "$LOG_FILE"
