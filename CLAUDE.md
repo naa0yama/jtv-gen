@@ -5,6 +5,7 @@
 * 作業の進捗は日本語で応答して
 * Bash Script を変更したら `./jtv_gen.sh -c scene_06min.conf -y` で動作を確認してください
 * Bash Script を利用します、 ShellCheck 記法でエラーが出ないように記述するようにしてください
+* 不要なスペースはタブは残さない
 
 ## compact 時の指示
 
