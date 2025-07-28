@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Japanese TV Content Generator (JTV Gen) Script
 # Generates Japanese TV broadcast dummy files
@@ -182,7 +182,6 @@ OPTIONS:
     --debug              Enable verbose debug output
     -c, --config FILE    Configuration file (default: scene_1.conf)
     -y, --yes           Skip confirmation prompt and start generation immediately
-    --h264              Use H.264/MPEG-4 video codec instead of MPEG-2 for smaller file size
     --skip-eit          Skip EIT/SDT/TDT metadata injection (default: inject metadata with TSDuck)
     -h, --help          Show this comprehensive help message
 
@@ -261,7 +260,6 @@ EOF
 
 # Parse command line arguments
 SKIP_CONFIRMATION=false
-USE_H264=false
 INJECT_EIT=true
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -277,10 +275,6 @@ while [[ $# -gt 0 ]]; do
             SKIP_CONFIRMATION=true
             shift
             ;;
-        --h264)
-            USE_H264=true
-            shift
-            ;;
         --skip-eit)
             INJECT_EIT=false
             shift
@@ -291,7 +285,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--debug] [-c|--config CONFIG_FILE] [-y|--yes] [--h264] [--skip-eit] [-h|--help] (default: scene_1.conf)"
+            echo "Usage: $0 [--debug] [-c|--config CONFIG_FILE] [-y|--yes] [--skip-eit] [-h|--help] (default: scene_1.conf)"
             echo "Use $0 --help for detailed information."
             exit 1
             ;;
@@ -400,47 +394,8 @@ load_config() {
     duration_seconds=$(calculate_duration 0 "$max_end_frame")
     CONFIG["BROADCAST_DURATION_SECONDS"]="$duration_seconds"
     
-    # Override codec settings if --h264 option is used
-    if [[ "$USE_H264" == true ]]; then
-        log "${BLUE}Switching to H.264/MPEG-4 video codec for smaller file size${NC}"
-        
-        # Calculate optimal H.264 bitrate (roughly 60% of MPEG-2 for same quality)
-        local mpeg2_bitrate="${CONFIG[VIDEO_BITRATE]}"
-        local mpeg2_value
-        mpeg2_value="${mpeg2_bitrate//[!0-9.]/}"
-        local mpeg2_unit
-        mpeg2_unit="${mpeg2_bitrate//[0-9.]/}"
-        
-        local h264_value
-        h264_value=$(echo "scale=1; $mpeg2_value * 0.6" | bc -l)
-        local h264_bitrate="${h264_value}${mpeg2_unit}"
-        
-        # Calculate maxrate (1.5x bitrate) 
-        local h264_maxrate_value
-        h264_maxrate_value=$(echo "scale=1; $h264_value * 1.5" | bc -l)
-        local h264_maxrate="${h264_maxrate_value}${mpeg2_unit}"
-        
-        local reduction_percent
-        reduction_percent=$(echo "scale=1; (1 - 0.6) * 100" | bc -l)
-        log "${GREEN}H.264 optimized bitrate: $mpeg2_bitrate → $h264_bitrate (${reduction_percent}% reduction)${NC}"
-        
-        CONFIG["VIDEO_CODEC"]="libx264"
-        CONFIG["VIDEO_PROFILE"]="high"
-        CONFIG["VIDEO_LEVEL"]="4.1"
-        CONFIG["VIDEO_BITRATE"]="$h264_bitrate"
-        CONFIG["VIDEO_MAXRATE"]="$h264_maxrate"
-        CONFIG["VIDEO_BUFSIZE"]="16M"
-        # Add H.264 specific parameters
-        CONFIG["H264_PRESET"]="medium"
-        CONFIG["H264_CRF"]="23"  # Slightly higher CRF for better efficiency
-    fi
-    
-    # Set final output filename based on codec choice
-    if [[ "$USE_H264" == true ]]; then
-        FINAL_OUTPUT="jtv_${CONFIG_BASENAME}_h264.ts"
-    else
-        FINAL_OUTPUT="jtv_${CONFIG_BASENAME}.ts"
-    fi
+    # Set final output filename
+    FINAL_OUTPUT="jtv_${CONFIG_BASENAME}.ts"
 }
 
 # Calculate frame duration from frame numbers
@@ -484,13 +439,8 @@ show_media_specs() {
     local duration_formatted
     duration_formatted=$(printf "%02d:%02d:%02d" $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}/3600)) $(((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%3600)/60)) $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%60)))
     
-    # Video codec display name
-    local video_codec_name
-    case "${CONFIG[VIDEO_CODEC]}" in
-        "mpeg2video") video_codec_name="MPEG-2" ;;
-        "libx264") video_codec_name="H.264/MPEG-4 AVC" ;;
-        *) video_codec_name="${CONFIG[VIDEO_CODEC]}" ;;
-    esac
+    # Video codec display name (MPEG-2 fixed)
+    local video_codec_name="MPEG-2"
     
     # Audio codec display name  
     local audio_codec_name
@@ -508,11 +458,8 @@ show_media_specs() {
         *) audio_channels_text="${CONFIG[AUDIO_CHANNELS]}ch" ;;
     esac
     
-    # Video format description
-    local video_format="progressive"
-    if [[ "${CONFIG[VIDEO_CODEC]}" == "mpeg2video" ]]; then
-        video_format="interlaced"
-    fi
+    # Video format description (interlaced fixed)
+    local video_format="interlaced"
     
     log "${GREEN}Video:${NC}         $video_codec_name, $video_format, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR ${CONFIG[VIDEO_ASPECT]}]"
     log "               ${CONFIG[FRAME_RATE]} fps, bitrate ${CONFIG[VIDEO_BITRATE]}, maxrate ${CONFIG[VIDEO_MAXRATE]}"
@@ -632,11 +579,6 @@ generate_main_segment() {
     # Create logo overlay (simple text as transparent logo)
     local logo_text="TV-LOGO"
     
-    # Build H.264 specific parameters if needed
-    local h264_params=()
-    if [[ "$USE_H264" == true ]]; then
-        h264_params=(-preset "${CONFIG[H264_PRESET]}" -crf "${CONFIG[H264_CRF]}" -x264opts keyint=60:min-keyint=1)
-    fi
     
     ffmpeg -y \
         -f lavfi -i "testsrc2=size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
@@ -653,7 +595,6 @@ generate_main_segment() {
         -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
         -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
         -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
-        ${h264_params:+"${h264_params[@]}"} \
         -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         "$output_file" 2>> "$LOG_FILE"
@@ -683,11 +624,6 @@ generate_cm_segment() {
     local color_index=$(( (0x$color_hash) % ${#colors[@]}))
     local color="${colors[$color_index]}"
     
-    # Build H.264 specific parameters if needed
-    local h264_params=()
-    if [[ "$USE_H264" == true ]]; then
-        h264_params=(-preset "${CONFIG[H264_PRESET]}" -crf "${CONFIG[H264_CRF]}" -x264opts keyint=60:min-keyint=1)
-    fi
     
     # Enhanced CM generation with silence padding and color inversion
     # For short durations, simplify to single segment
@@ -710,8 +646,7 @@ generate_cm_segment() {
             -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
             -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
             -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
-            ${h264_params:+"${h264_params[@]}"} \
-            -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+                -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             "$output_file" 2>> "$LOG_FILE"
     else
@@ -736,8 +671,7 @@ generate_cm_segment() {
             -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
             -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
             -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
-            ${h264_params:+"${h264_params[@]}"} \
-            -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+                -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             "$temp_content" 2>> "$LOG_FILE"
         
@@ -757,8 +691,7 @@ generate_cm_segment() {
             -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
             -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
             -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
-            ${h264_params:+"${h264_params[@]}"} \
-            -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+                -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             "$temp_silence" 2>> "$LOG_FILE"
         
@@ -872,11 +805,6 @@ concatenate_segments() {
         fi
     done
     
-    # Build H.264 specific parameters if needed
-    local h264_params=()
-    if [[ "$USE_H264" == true ]]; then
-        h264_params=(-preset "${CONFIG[H264_PRESET]}" -crf "${CONFIG[H264_CRF]}" -x264opts keyint=60:min-keyint=1)
-    fi
     
     # Concatenate and convert to MPEG-TS
     ffmpeg -y \
