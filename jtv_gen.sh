@@ -461,7 +461,7 @@ show_media_specs() {
     # Video format description (interlaced fixed)
     local video_format="interlaced"
     
-    log "${GREEN}Video:${NC}         $video_codec_name, $video_format, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR ${CONFIG[VIDEO_ASPECT]}]"
+    log "${GREEN}Video:${NC}         $video_codec_name, $video_format, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR 16:9]"
     log "               ${CONFIG[FRAME_RATE]} fps, bitrate ${CONFIG[VIDEO_BITRATE]}, maxrate ${CONFIG[VIDEO_MAXRATE]}"
     log "${GREEN}Audio:${NC}         $audio_codec_name, ${CONFIG[AUDIO_SAMPLE_RATE]}Hz, $audio_channels_text, ${CONFIG[AUDIO_BITRATE]}"
     log "${GREEN}Duration:${NC}      $duration_formatted (${CONFIG[BROADCAST_DURATION_FRAMES]} frames)"
@@ -588,13 +588,14 @@ generate_main_segment() {
             [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
         " \
         -map "[v]" -map "[a]" \
-        -c:v "${CONFIG[VIDEO_CODEC]}" -profile:v "${CONFIG[VIDEO_PROFILE]}" -level "${CONFIG[VIDEO_LEVEL]}" \
+        -c:v "${CONFIG[VIDEO_CODEC]}" \
         -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
         -max_muxing_queue_size 1024 \
-        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect "${CONFIG[VIDEO_ASPECT]}" \
-        -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
-        -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
-        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
+        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
+        -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
+        -profile:v main -level:v high -g 15 -keyint_min 3 \
+        -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
         -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         "$output_file" 2>> "$LOG_FILE"
@@ -639,13 +640,14 @@ generate_cm_segment() {
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
             -map "[v]" -map "[a]" \
-            -c:v "${CONFIG[VIDEO_CODEC]}" -profile:v "${CONFIG[VIDEO_PROFILE]}" -level "${CONFIG[VIDEO_LEVEL]}" \
+            -c:v "${CONFIG[VIDEO_CODEC]}" \
         -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
         -max_muxing_queue_size 1024 \
-            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect "${CONFIG[VIDEO_ASPECT]}" \
-            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
-            -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
+            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
+            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
+            -profile:v main -level:v high -g 15 -keyint_min 3 \
+            -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
                 -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             "$output_file" 2>> "$LOG_FILE"
@@ -669,13 +671,14 @@ generate_cm_segment() {
                 [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[v][a]
             " \
             -map "[v]" -map "[a]" \
-            -c:v "${CONFIG[VIDEO_CODEC]}" -profile:v "${CONFIG[VIDEO_PROFILE]}" -level "${CONFIG[VIDEO_LEVEL]}" \
+            -c:v "${CONFIG[VIDEO_CODEC]}" \
             -bf 2 -b_strategy 1 -sc_threshold 40 -qcomp 0.6 \
             -max_muxing_queue_size 1024 \
-            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect "${CONFIG[VIDEO_ASPECT]}" \
-            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 -pix_fmt yuv420p \
-            -colorspace bt709 -color_trc bt709 -color_primaries bt709 \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize "${CONFIG[VIDEO_BUFSIZE]}" \
+            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
+            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
+            -profile:v main -level:v high -g 15 -keyint_min 3 \
+            -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
             -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             "$output_file" 2>> "$LOG_FILE"
@@ -1274,7 +1277,7 @@ generate_report() {
         echo "Output: $OUTPUT_DIR/$FINAL_OUTPUT $eit_note"
         echo ""
         echo "Technical Specifications:"
-        echo "- Video:             ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} ${CONFIG[VIDEO_ASPECT]} ${CONFIG[FRAME_RATE]}fps"
+        echo "- Video:             ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} 16:9 ${CONFIG[FRAME_RATE]}fps"
         echo "- Video Codec:       ${CONFIG[VIDEO_CODEC]} ${CONFIG[VIDEO_BITRATE]}"
         echo "- Audio:             ${CONFIG[AUDIO_SAMPLE_RATE]}Hz ${CONFIG[AUDIO_CHANNELS]}ch ${CONFIG[AUDIO_BITRATE]}"
         echo "- Audio Levels:      0VU=${CONFIG[AUDIO_LEVEL_0VU]}dBFS, Silence<${CONFIG[AUDIO_SILENCE_THRESHOLD]}dBFS"
