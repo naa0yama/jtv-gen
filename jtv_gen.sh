@@ -577,8 +577,7 @@ generate_main_segment() {
     # Main segment generation (log handled by caller)
     
     # Create logo overlay (simple text as transparent logo)
-    local logo_text="TV-LOGO"
-    
+    local logo_text="JTV-Gen"
     
     ffmpeg -y \
         -f lavfi -i "testsrc2=size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
@@ -733,7 +732,7 @@ generate_segments() {
             "Main")
                 local formatted_sub_duration
                 formatted_sub_duration=$(format_duration "$time_duration")
-                log "${YELLOW}  → Generating main segment: $(printf "%-32s" "$name") ($(printf "%15s" "")$formatted_sub_duration)${NC}"
+                log "${YELLOW}  → Generating...: $(printf "%-32s" "$name")${NC}"
                 generate_main_segment "$name" "$time_duration" "$output_file" || {
                     log "${RED}Error generating main segment $name${NC}"
                     exit 1
@@ -742,7 +741,7 @@ generate_segments() {
             "CM")
                 local formatted_sub_duration
                 formatted_sub_duration=$(format_duration "$time_duration")
-                log "${YELLOW}  → Generating CM segment: $(printf "%-32s" "$name") ($(printf "%15s" "")$formatted_sub_duration)${NC}"
+                log "${YELLOW}  → Generating   : $(printf "%-32s" "$name")${NC}"
                 generate_cm_segment "$name" "$time_duration" "$output_file" || {
                     log "${RED}Error generating CM segment $name${NC}"
                     exit 1
@@ -750,7 +749,7 @@ generate_segments() {
                 ;;
         esac
         
-        log "${GREEN}  ✓ Completed: $name${NC}"
+        log "${GREEN}  ✓ Completed    : $name${NC}"
         segment_count=$((segment_count + 1))
         [[ "$DEBUG" == true ]] && log "${BLUE}Moving to next segment (current count: $segment_count)${NC}"
     done
