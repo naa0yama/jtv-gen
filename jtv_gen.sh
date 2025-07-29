@@ -338,7 +338,7 @@ generate_logo_image() {
              drawbox=x=w-$corner_size:y=0:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
              drawbox=x=0:y=h-$corner_size:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
              drawbox=x=w-$corner_size:y=h-$corner_size:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
-             drawtext=fontsize=$logo_size:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2" \
+             drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2" \
         -frames:v 1 -pix_fmt rgba -update 1 \
         "$output_path" 2>> "$LOG_FILE"
     
@@ -652,8 +652,8 @@ generate_main_segment() {
             -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
             -i "$logo_image_path" \
             -filter_complex "
-                [0:v]${deinterlace_filter}drawtext=fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
-                drawtext=fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10[bg];
+                [0:v]${deinterlace_filter}drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
+                drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10[bg];
                 [bg][2:v]overlay=W-w-40:40:format=auto[v];
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
@@ -676,10 +676,9 @@ generate_main_segment() {
             -f lavfi -i "testsrc2=size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
             -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
             -filter_complex "
-                [0:v]drawtext=fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.7:boxborderw=10,
-                drawtext=fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.7:boxborderw=10,
-                drawtext=fontsize=$logo_size:fontcolor=white@${CONFIG[MAIN_LOGO_OPACITY]:-"0.8"}:text='$logo_text':x=$logo_pos_x:y=$logo_pos_y:box=$logo_box_enabled:boxcolor=$logo_box_color:boxborderw=$logo_box_border,
-                drawtext=fontsize=24:fontcolor=white@0.9:text='●':x=$logo_pos_x+120:y=$logo_pos_y+5:box=1:boxcolor=red@0.7:boxborderw=3[v];
+                [0:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.7:boxborderw=10,
+                drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.7:boxborderw=10,
+                drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size:fontcolor=white@${CONFIG[MAIN_LOGO_OPACITY]:-"0.8"}:text='$logo_text':x=$logo_pos_x:y=$logo_pos_y:box=$logo_box_enabled:boxcolor=$logo_box_color:boxborderw=$logo_box_border[v];
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
             -map "[v]" -map "[a]" \
@@ -731,7 +730,7 @@ generate_cm_segment() {
             -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
             -f lavfi -i "sine=frequency=800:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
             -filter_complex "
-                [0:v]drawtext=fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v];
+                [0:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v];
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
             -map "[v]" -map "[a]" \
@@ -757,11 +756,11 @@ generate_cm_segment() {
             -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
             -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
             -filter_complex "
-                [0:v]negate,drawtext=fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
+                [0:v]negate,drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
                 [1:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence1];
-                [2:v]drawtext=fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
+                [2:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
                 [3:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a_content];
-                [4:v]negate,drawtext=fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
+                [4:v]negate,drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
                 [5:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence2];
                 [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[v][a]
             " \
@@ -1725,6 +1724,11 @@ check_dependencies() {
 
     if ! ffmpeg -filters 2>/dev/null | grep -qi "drawtext"; then
         warnings+=("drawtext filter for text overlay")
+    fi
+
+    # Check Liberation Sans font for better text rendering
+    if ! fc-list | grep -qi "liberation.*sans" && ! dpkg -l | grep -qi "fonts-liberation"; then
+        warnings+=("Liberation Sans font (install with: sudo apt install fonts-liberation)")
     fi
 
     if ! ffmpeg -muxers 2>/dev/null | grep -qi "mpegts"; then
