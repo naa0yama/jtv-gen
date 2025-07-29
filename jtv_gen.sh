@@ -339,12 +339,12 @@ generate_logo_image() {
     ffmpeg -y \
         -f lavfi -i "color=black:size=${image_width_6x}x${image_height_6x}:rate=1:duration=1" \
         -vf "format=rgba,
-             colorkey=black:0.01:0.1,
              drawbox=x=0:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
-             drawbox=x=w-$corner_size_6x:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
-             drawbox=x=0:y=h-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
-             drawbox=x=w-$corner_size_6x:y=h-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
-             drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size_6x:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2" \
+             drawbox=x=iw-$corner_size_6x:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
+             drawbox=x=0:y=ih-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
+             drawbox=x=iw-$corner_size_6x:y=ih-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
+             drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size_6x:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2,
+             colorkey=black:0.5:0.1" \
         -frames:v 1 -pix_fmt rgba -update 1 \
         "$output_path" 2>> "$LOG_FILE"
     
@@ -634,10 +634,10 @@ generate_main_segment() {
     local logo_method="${CONFIG[LOGO_METHOD]:-image}"
     
     # Debug output for troubleshooting
-    log "${YELLOW}DEBUG: logo_method=$logo_method, amatsukaze_mode=$amatsukaze_mode, logo_stability=$logo_stability${NC}"
+    [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${YELLOW}DEBUG: logo_method=$logo_method, amatsukaze_mode=$amatsukaze_mode, logo_stability=$logo_stability${NC}"
     
     if [[ "$logo_method" == "image" ]]; then
-        log "${GREEN}DEBUG: Using IMAGE OVERLAY method for logo generation${NC}"
+        [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${GREEN}DEBUG: Using IMAGE OVERLAY method for logo generation${NC}"
         # Image overlay method for high-quality logo with Amatsukaze optimization
         local bg_color="${CONFIG[AMATSUKAZE_BG_COLOR]:-gray}"
         local deinterlace_filter=""
@@ -677,7 +677,7 @@ generate_main_segment() {
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             -f mpegts "$output_file" 2>> "$LOG_FILE"
     else
-        log "${RED}DEBUG: Using STANDARD DRAWTEXT method (fallback mode)${NC}"
+        [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${RED}DEBUG: Using STANDARD DRAWTEXT method (fallback mode)${NC}"
         # Standard mode - original testsrc2 pattern for backward compatibility
         ffmpeg -y \
             -f lavfi -i "testsrc2=size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
