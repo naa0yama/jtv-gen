@@ -327,18 +327,24 @@ generate_logo_image() {
     local image_height="${6:-80}"
     local corner_size="${7:-4}"
     
-    log "${BLUE}Generating logo image: $output_path${NC}"
+    # 6x super-sampling for high quality logo
+    local logo_size_6x=$((logo_size * 6))
+    local image_width_6x=$((image_width * 6))
+    local image_height_6x=$((image_height * 6))
+    local corner_size_6x=$((corner_size * 6))
+    
+    log "${BLUE}Generating 6x super-sampled logo image: $output_path (${image_width_6x}x${image_height_6x})${NC}"
     
     # Generate transparent PNG logo with corner markers - Using colorkey method
     ffmpeg -y \
-        -f lavfi -i "color=black:size=${image_width}x${image_height}:rate=1:duration=1" \
+        -f lavfi -i "color=black:size=${image_width_6x}x${image_height_6x}:rate=1:duration=1" \
         -vf "format=rgba,
              colorkey=black:0.01:0.1,
-             drawbox=x=0:y=0:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
-             drawbox=x=w-$corner_size:y=0:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
-             drawbox=x=0:y=h-$corner_size:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
-             drawbox=x=w-$corner_size:y=h-$corner_size:w=$corner_size:h=$corner_size:color=red@1.0:t=fill,
-             drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2" \
+             drawbox=x=0:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
+             drawbox=x=w-$corner_size_6x:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
+             drawbox=x=0:y=h-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
+             drawbox=x=w-$corner_size_6x:y=h-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
+             drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size_6x:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2" \
         -frames:v 1 -pix_fmt rgba -update 1 \
         "$output_path" 2>> "$LOG_FILE"
     
@@ -654,7 +660,8 @@ generate_main_segment() {
             -filter_complex "
                 [0:v]${deinterlace_filter}drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
                 drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10[bg];
-                [bg][2:v]overlay=W-w-40:40:format=auto[v];
+                [2:v]scale=200:80:flags=lanczos+accurate_rnd[logo_scaled];
+                [bg][logo_scaled]overlay=W-w-40:40:format=auto[v];
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
             -map "[v]" -map "[a]" \
