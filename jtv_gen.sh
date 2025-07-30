@@ -648,21 +648,16 @@ generate_main_segment() {
             deinterlace_filter="yadif=mode=1:parity=auto:deint=interlaced,"
         fi
         
-        # Generate logo image if not exists
-        if [[ ! -f "$logo_image_path" ]]; then
-            generate_logo_image "$logo_text" "$logo_size" "$logo_image_path" "0.75" "200" "80" "4"
-        fi
+        # Logo is now drawn directly with drawtext - no image generation needed
         
         ffmpeg -y \
             -f lavfi -i "color=$bg_color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
             -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
-            -i "$logo_image_path" \
             -filter_complex "
-                [0:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
-                drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10[bg];
-                [2:v]scale=200:80:flags=lanczos+accurate_rnd+full_chroma_int[logo_scaled];
-                [bg][logo_scaled]overlay=W-w-40:40:shortest=0:repeatlast=1[overlaid];
-                [overlaid]${deinterlace_filter}format=yuv420p[v];
+                [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
+                drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10,
+                drawtext=fontfile='Ubuntu\:style=Bold':fontsize=36:fontcolor=white@0.75:text='JTV-Gen':x=w-text_w-40:y=40:box=0:ft_load_flags=no_hinting,
+                ${deinterlace_filter}format=yuv420p[v];
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
             -map "[v]" -map "[a]" \
@@ -684,9 +679,10 @@ generate_main_segment() {
             -f lavfi -i "testsrc2=size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
             -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
             -filter_complex "
-                [0:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.7:boxborderw=10,
-                drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.7:boxborderw=10,
-                drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size:fontcolor=white@${CONFIG[MAIN_LOGO_OPACITY]:-"0.8"}:text='$logo_text':x=$logo_pos_x:y=$logo_pos_y:box=$logo_box_enabled:boxcolor=$logo_box_color:boxborderw=$logo_box_border[v];
+                [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.7:boxborderw=10,
+                drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.7:boxborderw=10,
+                drawtext=fontfile='Ubuntu\:style=Bold':fontsize=$logo_size:fontcolor=white@${CONFIG[MAIN_LOGO_OPACITY]:-"0.8"}:text='$logo_text':x=$logo_pos_x:y=$logo_pos_y:box=$logo_box_enabled:boxcolor=$logo_box_color:boxborderw=$logo_box_border:ft_load_flags=no_hinting,
+                ${deinterlace_filter}format=yuv420p[v];
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
             -map "[v]" -map "[a]" \
@@ -728,35 +724,11 @@ generate_cm_segment() {
     local color_index=$(( (0x$color_hash) % ${#colors[@]}))
     local color="${colors[$color_index]}"
 
-    # Enhanced CM generation with silence padding and color inversion
-    # For short durations, simplify to single segment
-    local duration_check
-    duration_check=$(echo "$duration < 5.0" | bc -l)
-    if (( duration_check )); then
-        # Short CM - single segment with audio, optimized filter chain
-        ffmpeg -y \
-            -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
-            -f lavfi -i "sine=frequency=800:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
-            -filter_complex "
-                [0:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2,
-                yadif=mode=1:parity=1,format=yuv420p[v];
-                [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
-            " \
-            -map "[v]" -map "[a]" \
-            -c:v "${CONFIG[VIDEO_CODEC]}" \
-        -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
-        -max_muxing_queue_size 1024 \
-            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
-            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
-            -profile:v main -level:v high -g 15 -keyint_min 3 \
-            -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
-                -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
-            -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-            -f mpegts "$output_file" 2>> "$LOG_FILE"
-    else
-        # Long CM - with silence padding and color inversion using single FFmpeg command
-        # Structure: silence(inverted) -> content(normal) -> silence(inverted)
+    # CM generation with unified structure: 0.5sec silence + content + 0.5sec silence
+    # Minimum CM duration: 15 seconds (as per specification)
+    local MIN_CM_DURATION=15.0
+    
+    # All CMs use the same structure: silence(inverted) -> content(normal) -> silence(inverted)
         ffmpeg -y \
             -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
             -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
@@ -765,11 +737,11 @@ generate_cm_segment() {
             -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
             -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
             -filter_complex "
-                [0:v]negate,drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
+                [0:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
                 [1:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence1];
-                [2:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
+                [2:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
                 [3:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a_content];
-                [4:v]negate,drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
+                [4:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
                 [5:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence2];
                 [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated][a];
                 [concatenated]yadif=mode=1:parity=1,format=yuv420p[v]
@@ -786,7 +758,6 @@ generate_cm_segment() {
             -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             -f mpegts "$output_file" 2>> "$LOG_FILE"
-    fi
 }
 
 # Calculate optimal number of parallel jobs
@@ -1736,9 +1707,9 @@ check_dependencies() {
         warnings+=("drawtext filter for text overlay")
     fi
 
-    # Check Liberation Sans font for better text rendering
-    if ! fc-list | grep -qi "liberation.*sans" && ! dpkg -l | grep -qi "fonts-liberation"; then
-        warnings+=("Liberation Sans font (install with: sudo apt install fonts-liberation)")
+    # Check Ubuntu font for optimal text rendering
+    if ! fc-list | grep -qi "ubuntu.*bold" && ! dpkg -l | grep -qi "fonts-ubuntu"; then
+        warnings+=("Ubuntu font (install with: sudo apt install fonts-ubuntu)")
     fi
 
     if ! ffmpeg -muxers 2>/dev/null | grep -qi "mpegts"; then
@@ -1789,9 +1760,7 @@ main() {
     if [[ "${CONFIG[LOGO_METHOD]:-image}" == "image" ]]; then
         log "${BLUE}Pre-generating logo image for overlay method${NC}"
         mkdir -p "$TEMP_DIR"
-        local logo_text="${CONFIG[LOGO_TEXT]:-JTV-Gen}"
-        local logo_size="${CONFIG[LOGO_SIZE]:-36}"
-        generate_logo_image "$logo_text" "$logo_size" "$TEMP_DIR/logo.png" "0.75" "200" "80" "4"
+        # Logo generation no longer needed - using direct drawtext rendering
     fi
     
     generate_metadata_files
