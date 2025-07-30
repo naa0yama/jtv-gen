@@ -636,13 +636,7 @@ generate_main_segment() {
     [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${GREEN}DEBUG: Using高品質ロゴ生成モード${NC}"
     # 高品質ロゴ生成モード
     local bg_color="${CONFIG[LOGO_BG_COLOR]:-gray}"
-    local deinterlace_filter=""
     local logo_image_path="$TEMP_DIR/logo.png"
-    
-    # Add deinterlace filter if enabled (denoise disabled for image quality)
-    if [[ "${CONFIG[LOGO_DEINTERLACE]:-true}" == "true" ]]; then
-        deinterlace_filter="yadif=mode=1:parity=auto:deint=interlaced,"
-    fi
     
     # Logo is now drawn directly with drawtext - no image generation needed
     
@@ -652,8 +646,8 @@ generate_main_segment() {
         -filter_complex "
             [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
             drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10,
-            drawtext=fontfile='Ubuntu\:style=Bold':fontsize=36:fontcolor=white@0.75:text='JTV-Gen':x=w-text_w-40:y=40:box=0:ft_load_flags=no_hinting,
-            ${deinterlace_filter}format=yuv420p[v];
+            drawtext=fontfile='Ubuntu\:style=Bold':fontsize=40:fontcolor=white@0.55:text='JTV-Gen':x=w-text_w-40:y=40:box=0,
+            format=yuv420p[v];
             [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
         " \
         -map "[v]" -map "[a]" \
@@ -662,9 +656,10 @@ generate_main_segment() {
         -max_muxing_queue_size 1024 \
         -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
         -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
+        -alternate_scan 1 \
         -profile:v main -level:v high -g 15 -keyint_min 3 \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
+        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
         -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         -f mpegts "$output_file" 2>> "$LOG_FILE"
@@ -714,7 +709,7 @@ generate_cm_segment() {
                 [4:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
                 [5:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence2];
                 [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated][a];
-                [concatenated]yadif=mode=1:parity=1,format=yuv420p[v]
+                [concatenated]format=yuv420p[v]
             " \
             -map "[v]" -map "[a]" \
             -c:v "${CONFIG[VIDEO_CODEC]}" \
@@ -722,9 +717,10 @@ generate_cm_segment() {
             -max_muxing_queue_size 1024 \
             -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
             -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
+            -alternate_scan 1 \
             -profile:v main -level:v high -g 15 -keyint_min 3 \
             -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
+            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
             -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
             -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
             -f mpegts "$output_file" 2>> "$LOG_FILE"
