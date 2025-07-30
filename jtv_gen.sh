@@ -317,7 +317,7 @@ FINAL_OUTPUT=""
 # CORE FUNCTIONS
 # ============================================================================
 
-# Generate high-quality logo image with corner markers for Amatsukaze detection
+# Generate high-quality logo image with corner markers for logo detection
 generate_logo_image() {
     local logo_text="$1"
     local logo_size="$2"
@@ -609,15 +609,15 @@ preview_segments() {
     esac
 }
 
-# Generate main program segment with enhanced logo for Amatsukaze detection
+# Generate main program segment with enhanced logo for stable logo detection
 generate_main_segment() {
     local segment_name=$1
     local duration=$2
     local output_file=$3
 
-    # Main segment generation with Amatsukaze-optimized logo for stable detection
+    # Main segment generation with 高品質 logo for stable detection
     
-    # Logo configuration from config file with Amatsukaze optimizations
+    # Logo configuration from config file with ロゴ最適化
     local logo_text="${CONFIG[LOGO_TEXT]:-JTV-Gen}"
     local logo_size="${CONFIG[LOGO_SIZE]:-36}"
     local logo_pos_x="${CONFIG[LOGO_POSITION_X]:-w-text_w-40}"
@@ -626,78 +626,48 @@ generate_main_segment() {
     local logo_box_color="${CONFIG[LOGO_BOX_COLOR]:-black@0.8}"
     local logo_box_border="${CONFIG[LOGO_BOX_BORDER]:-5}"
     
-    # Amatsukaze stability mode - use solid background for stable logo detection
-    local amatsukaze_mode="${CONFIG[AMATSUKAZE_OPTIMIZED_MODE]:-true}"
+    # ロゴ安定モード - use solid background for stable logo detection
+    local logo_optimized_mode="${CONFIG[LOGO_OPTIMIZED_MODE]:-true}"
     local logo_stability="${CONFIG[LOGO_STABILITY_MODE]:-enhanced}"
     
-    # Check logo method - image overlay or text drawtext
-    local logo_method="${CONFIG[LOGO_METHOD]:-image}"
-    
     # Debug output for troubleshooting
-    [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${YELLOW}DEBUG: logo_method=$logo_method, amatsukaze_mode=$amatsukaze_mode, logo_stability=$logo_stability${NC}"
+    [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${YELLOW}DEBUG: logo_optimized_mode=$logo_optimized_mode, logo_stability=$logo_stability${NC}"
     
-    if [[ "$logo_method" == "image" ]]; then
-        [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${GREEN}DEBUG: Using IMAGE OVERLAY method for logo generation${NC}"
-        # Image overlay method for high-quality logo with Amatsukaze optimization
-        local bg_color="${CONFIG[AMATSUKAZE_BG_COLOR]:-gray}"
-        local deinterlace_filter=""
-        local logo_image_path="$TEMP_DIR/logo.png"
-        
-        # Add deinterlace filter if enabled (denoise disabled for image quality)
-        if [[ "${CONFIG[AMATSUKAZE_DEINTERLACE]:-true}" == "true" ]]; then
-            deinterlace_filter="yadif=mode=1:parity=auto:deint=interlaced,"
-        fi
-        
-        # Logo is now drawn directly with drawtext - no image generation needed
-        
-        ffmpeg -y \
-            -f lavfi -i "color=$bg_color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
-            -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
-            -filter_complex "
-                [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
-                drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10,
-                drawtext=fontfile='Ubuntu\:style=Bold':fontsize=36:fontcolor=white@0.75:text='JTV-Gen':x=w-text_w-40:y=40:box=0:ft_load_flags=no_hinting,
-                ${deinterlace_filter}format=yuv420p[v];
-                [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
-            " \
-            -map "[v]" -map "[a]" \
-            -c:v "${CONFIG[VIDEO_CODEC]}" \
-            -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
-            -max_muxing_queue_size 1024 \
-            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
-            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
-            -profile:v main -level:v high -g 15 -keyint_min 3 \
-            -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
-            -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
-            -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-            -f mpegts "$output_file" 2>> "$LOG_FILE"
-    else
-        [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${RED}DEBUG: Using STANDARD DRAWTEXT method (fallback mode)${NC}"
-        # Standard mode - original testsrc2 pattern for backward compatibility
-        ffmpeg -y \
-            -f lavfi -i "testsrc2=size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
-            -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
-            -filter_complex "
-                [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.7:boxborderw=10,
-                drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.7:boxborderw=10,
-                drawtext=fontfile='Ubuntu\:style=Bold':fontsize=$logo_size:fontcolor=white@${CONFIG[MAIN_LOGO_OPACITY]:-"0.8"}:text='$logo_text':x=$logo_pos_x:y=$logo_pos_y:box=$logo_box_enabled:boxcolor=$logo_box_color:boxborderw=$logo_box_border:ft_load_flags=no_hinting,
-                ${deinterlace_filter}format=yuv420p[v];
-                [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
-            " \
-            -map "[v]" -map "[a]" \
-            -c:v "${CONFIG[VIDEO_CODEC]}" \
-            -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
-            -max_muxing_queue_size 1024 \
-            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
-            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
-            -profile:v main -level:v high -g 15 -keyint_min 3 \
-            -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
-            -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
-            -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-            -f mpegts "$output_file" 2>> "$LOG_FILE"
+    [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${GREEN}DEBUG: Using高品質ロゴ生成モード${NC}"
+    # 高品質ロゴ生成モード
+    local bg_color="${CONFIG[LOGO_BG_COLOR]:-gray}"
+    local deinterlace_filter=""
+    local logo_image_path="$TEMP_DIR/logo.png"
+    
+    # Add deinterlace filter if enabled (denoise disabled for image quality)
+    if [[ "${CONFIG[LOGO_DEINTERLACE]:-true}" == "true" ]]; then
+        deinterlace_filter="yadif=mode=1:parity=auto:deint=interlaced,"
     fi
+    
+    # Logo is now drawn directly with drawtext - no image generation needed
+    
+    ffmpeg -y \
+        -f lavfi -i "color=$bg_color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
+        -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
+        -filter_complex "
+            [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
+            drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10,
+            drawtext=fontfile='Ubuntu\:style=Bold':fontsize=36:fontcolor=white@0.75:text='JTV-Gen':x=w-text_w-40:y=40:box=0:ft_load_flags=no_hinting,
+            ${deinterlace_filter}format=yuv420p[v];
+            [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
+        " \
+        -map "[v]" -map "[a]" \
+        -c:v "${CONFIG[VIDEO_CODEC]}" \
+        -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
+        -max_muxing_queue_size 1024 \
+        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
+        -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
+        -profile:v main -level:v high -g 15 -keyint_min 3 \
+        -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -bufsize 9781248 \
+        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+        -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
+        -f mpegts "$output_file" 2>> "$LOG_FILE"
 }
 
 # Generate CM segment with silence padding and color inversion
@@ -1252,8 +1222,8 @@ inject_eit_metadata() {
     # Optimized injection using single tsp pipeline
     log "${YELLOW}Injecting PSI/SI tables using optimized method${NC}"
 
-    # Use Amatsukaze-optimized frequencies
-    local optimized_mode="${CONFIG[AMATSUKAZE_OPTIMIZED_MODE]:-true}"
+    # Use 最適化された frequencies
+    local optimized_mode="${CONFIG[LOGO_OPTIMIZED_MODE]:-true}"
 
     # Check which tables are available (comprehensive PSI/SI)
     local available_tables=()
@@ -1413,11 +1383,11 @@ inject_eit_metadata() {
     fi
 }
 
-# Verify Amatsukaze compatibility
-verify_amatsukaze_compatibility() {
+# Verify broadcast compatibility
+verify_broadcast_compatibility() {
     local output_file="$1"
 
-    log "${BLUE}Verifying Amatsukaze compatibility${NC}"
+    log "${BLUE}Verifying broadcast compatibility${NC}"
 
     if [[ ! -f "$output_file" ]]; then
         log "${RED}Error: Output file not found for verification${NC}"
@@ -1438,8 +1408,8 @@ verify_amatsukaze_compatibility() {
         log "${YELLOW}Warning: tsanalyze not available, skipping structure check${NC}"
     fi
 
-    # Detailed Amatsukaze compatibility checks
-    log "${YELLOW}Amatsukaze compatibility checks:${NC}"
+    # Detailed broadcast compatibility checks
+    log "${YELLOW}Broadcast compatibility checks:${NC}"
 
     # 1. Service information verification
     log "${BLUE}1. Service information:${NC}"
@@ -1480,15 +1450,15 @@ verify_amatsukaze_compatibility() {
         fi
     fi
 
-    # Amatsukaze test procedure display
-    log "${GREEN}Amatsukaze test procedure:${NC}"
-    log "${GREEN}  1. Start Amatsukaze${NC}"
-    log "${GREEN}  2. [Queue] > [Add] select: $output_file${NC}"
-    log "${GREEN}  3. Verify the following are displayed:${NC}"
+    # Broadcast verification procedure
+    log "${GREEN}Broadcast verification procedure:${NC}"
+    log "${GREEN}  1. Check PSI/SI metadata injection${NC}"
+    log "${GREEN}  2. Verify service information display${NC}"
+    log "${GREEN}  3. Confirm the following are included:${NC}"
     log "${GREEN}     ✅ Genre information${NC}"
     log "${GREEN}     ✅ Resolution information${NC}"
-    log "${GREEN}     ✅ Channel name: ${CONFIG[BROADCAST_SERVICE_NAME]}${NC}"
-    log "${GREEN}     ✅ Time info: ${CONFIG[BROADCAST_START_TIME]}${NC}"
+    log "${GREEN}     ✅ Service name: ${CONFIG[BROADCAST_SERVICE_NAME]}${NC}"
+    log "${GREEN}     ✅ Start time: ${CONFIG[BROADCAST_START_TIME]}${NC}"
 
     return 0
 }
@@ -1756,12 +1726,10 @@ main() {
     # Process
     load_config
     
-    # Pre-generate logo if using image method
-    if [[ "${CONFIG[LOGO_METHOD]:-image}" == "image" ]]; then
-        log "${BLUE}Pre-generating logo image for overlay method${NC}"
-        mkdir -p "$TEMP_DIR"
-        # Logo generation no longer needed - using direct drawtext rendering
-    fi
+    # Pre-generate directories
+    log "${BLUE}Preparing temporary directories${NC}"
+    mkdir -p "$TEMP_DIR"
+    # Logo generation no longer needed - using direct drawtext rendering
     
     generate_metadata_files
     preview_segments
@@ -1771,7 +1739,7 @@ main() {
     move_final_output
     generate_report
 
-    # Enhanced verification with Amatsukaze compatibility check
+    # Enhanced verification with broadcast compatibility check
     local final_output_path="$OUTPUT_DIR/$FINAL_OUTPUT"
     if [[ -f "$final_output_path" ]]; then
         log "${BLUE}Technical verification:${NC}"
@@ -1779,8 +1747,8 @@ main() {
             jq -r '.format | "Duration: \(.duration)s, Size: \(.size) bytes, Bitrate: \(.bit_rate) bps"' 2>/dev/null || \
             ffprobe -v error -show_entries format=duration,size,bit_rate -of csv=p=0 "$final_output_path"
 
-        # Run Amatsukaze compatibility verification (new feature)
-        verify_amatsukaze_compatibility "$final_output_path"
+        # Run broadcast compatibility verification
+        verify_broadcast_compatibility "$final_output_path"
     fi
 
     cleanup "${1:-}"
