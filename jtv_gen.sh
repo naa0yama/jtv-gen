@@ -335,16 +335,16 @@ generate_logo_image() {
     
     log "${BLUE}Generating 6x super-sampled logo image: $output_path (${image_width_6x}x${image_height_6x})${NC}"
     
-    # Generate transparent PNG logo with corner markers - Using colorkey method
+    # Generate transparent PNG logo with corner markers - Optimized color space processing
     ffmpeg -y \
         -f lavfi -i "color=black:size=${image_width_6x}x${image_height_6x}:rate=1:duration=1" \
-        -vf "format=rgba,
-             drawbox=x=0:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
+        -vf "drawbox=x=0:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
              drawbox=x=iw-$corner_size_6x:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
              drawbox=x=0:y=ih-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
              drawbox=x=iw-$corner_size_6x:y=ih-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
              drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size_6x:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2,
-             colorkey=black:0.5:0.1" \
+             colorkey=black:0.5:0.1,
+             format=rgba" \
         -frames:v 1 -pix_fmt rgba -update 1 \
         "$output_path" 2>> "$LOG_FILE"
     
@@ -658,10 +658,11 @@ generate_main_segment() {
             -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
             -i "$logo_image_path" \
             -filter_complex "
-                [0:v]${deinterlace_filter}drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
+                [0:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
                 drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10[bg];
-                [2:v]scale=200:80:flags=lanczos+accurate_rnd[logo_scaled];
-                [bg][logo_scaled]overlay=W-w-40:40:format=auto[v];
+                [2:v]scale=200:80:flags=lanczos+accurate_rnd+full_chroma_int[logo_scaled];
+                [bg][logo_scaled]overlay=W-w-40:40:shortest=0:repeatlast=1[overlaid];
+                [overlaid]${deinterlace_filter}format=yuv420p[v];
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
             -map "[v]" -map "[a]" \
@@ -732,12 +733,13 @@ generate_cm_segment() {
     local duration_check
     duration_check=$(echo "$duration < 5.0" | bc -l)
     if (( duration_check )); then
-        # Short CM - single segment with audio
+        # Short CM - single segment with audio, optimized filter chain
         ffmpeg -y \
             -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
             -f lavfi -i "sine=frequency=800:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
             -filter_complex "
-                [0:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v];
+                [0:v]drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2,
+                yadif=mode=1:parity=1,format=yuv420p[v];
                 [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
             " \
             -map "[v]" -map "[a]" \
@@ -769,7 +771,8 @@ generate_cm_segment() {
                 [3:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a_content];
                 [4:v]negate,drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
                 [5:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence2];
-                [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[v][a]
+                [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated][a];
+                [concatenated]yadif=mode=1:parity=1,format=yuv420p[v]
             " \
             -map "[v]" -map "[a]" \
             -c:v "${CONFIG[VIDEO_CODEC]}" \
