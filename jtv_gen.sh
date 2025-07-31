@@ -641,7 +641,7 @@ generate_main_segment() {
     # Logo is now drawn directly with drawtext - no image generation needed
     
     ffmpeg -y \
-        -f lavfi -i "color=$bg_color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$duration" \
+	-f lavfi -i "pal75bars=size=1920x1080:rate=${CONFIG[FRAME_RATE]}:duration=$duration,crop=${CONFIG[VIDEO_WIDTH]}:${CONFIG[VIDEO_HEIGHT]}:'24*t':0" \
         -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
         -filter_complex "
             [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
@@ -652,12 +652,9 @@ generate_main_segment() {
         " \
         -map "[v]" -map "[a]" \
         -c:v "${CONFIG[VIDEO_CODEC]}" \
-        -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
-        -max_muxing_queue_size 1024 \
-        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
-        -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
-        -alternate_scan 1 \
-        -profile:v main -level:v high -g 15 -keyint_min 3 \
+        -aspect 16:9 \
+        -r "${CONFIG[FRAME_RATE]}" -field_order progressive \
+        -profile:v main -level:v high \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
         -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
         -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
@@ -713,12 +710,9 @@ generate_cm_segment() {
             " \
             -map "[v]" -map "[a]" \
             -c:v "${CONFIG[VIDEO_CODEC]}" \
-            -bf 3 -b_strategy 2 -sc_threshold 50 -qcomp 0.7 \
-            -max_muxing_queue_size 1024 \
             -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
-            -r "${CONFIG[FRAME_RATE]}" -field_order tt -flags +ildct+ilme -top 1 \
-            -alternate_scan 1 \
-            -profile:v main -level:v high -g 15 -keyint_min 3 \
+            -r "${CONFIG[FRAME_RATE]}" -field_order progressive \
+            -profile:v main -level:v high \
             -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
             -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
             -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
