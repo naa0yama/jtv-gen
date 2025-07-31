@@ -1,225 +1,141 @@
-# Amatsukaze ロゴスキャン解析ドキュメント
+# Amatsukaze ロゴ解析システム 仕様調査
 
 ## 概要
+Amatsukazeのロゴ解析プログラムの動作ロジックと「Insufficient logo frames」エラーの原因分析結果。
 
-Amatsukazeのロゴスキャン機能は、日本のテレビ放送に含まれるロゴ（放送局ロゴなど）を自動検出・解析するシステムです。このドキュメントでは、ロゴスキャンアルゴリズムの詳細と「Insufficient logo frames」エラーの原因・対策について解説します。
+## 主要コンポーネント
 
-## アーキテクチャ概要
+### 1. ロゴデータ構造
+- **LogoData** (AMTLogo.cpp:161-238)
+  - YUV各プレーンのA・Bパラメータを保存
+  - ロゴファイル(.lgd)の読み書き機能
+  - 透明度モデル: Y = A*X + B
 
-### 主要クラス構成
+### 2. ロゴスキャン・解析
+- **LogoScan** (LogoScan.cpp:395-481)
+  - 動画フレームからロゴを抽出する中核クラス
+  - 背景色検出と統計処理によるロゴ生成
 
-```
-LogoAnalyzer (AMTObject)
-├── InitialLogoCreator (SimpleVideoReader)
-│   └── LogoScan
-│       └── LogoColor[] (Y, U, V)
-└── LogoDataParam (LogoData)
-    ├── mask[]
-    ├── kernels[]
-    └── scales[]
-```
+- **LogoAnalyzer** (LogoScan.cpp:647-693)
+  - ロゴスキャンの全体制御
+  - 2段階処理（初期ロゴ作成→精緻化）
 
-## ロゴスキャンアルゴリズム
+## ロゴ検出アルゴリズム
 
-### 1. フレーム検証プロセス (`LogoScan::AddFrame`)
-
-#### 1.1 背景色計算
+### 背景色検出ロジック
 ```cpp
-// 画面境界のピクセル値を収集
+// LogoScan.cpp:187-234
+// フレーム周辺部の画素値を収集して単一色背景を判定
 for (int x = 0; x < scanw; x++) {
-    tmpY.push_back(srcY[x]);                           // 上境界
-    tmpY.push_back(srcY[x + (scanh - 1) * pitchY]);   // 下境界
+    tmpY.push_back(srcY[x]);  // 上端
+    tmpY.push_back(srcY[x + (scanh - 1) * pitchY]);  // 下端
 }
-for (int y = 1; y < scanh - 1; y++) {
-    tmpY.push_back(srcY[y * pitchY]);                  // 左境界
-    tmpY.push_back(srcY[scanw - 1 + y * pitchY]);     // 右境界
-}
-```
-
-#### 1.2 背景色均一性チェック
-```cpp
-std::sort(tmpY.begin(), tmpY.end());
+// 最小と最大が閾値以上離れている場合、単一色でないと判断
 if (abs(tmpY.front() - tmpY.back()) > (thy << (bitdepth - 8))) {
-    return false;  // フレーム無効
+    return false;
 }
 ```
 
-**検証条件:**
-- Y成分の変動が `thy << (bitdepth - 8)` 以下
-- U、V成分も同様の条件を満たす
-- すべての条件をクリアした場合のみ有効フレーム
+**重要**: 指定した矩形範囲内のみで判定される（画面全域ではない）
 
-#### 1.3 パラメータ詳細
-- **thy**: 背景色均一性の閾値（デフォルト: 30*8=240、8bitでは12程度）
-- **bitdepth**: ピクセルビット深度（8bit/10bit対応）
-- **scanw/scanh**: スキャン領域のサイズ
-
-### 2. ロゴデータ生成プロセス (`LogoScan::GetLogo`)
-
-#### 2.1 回帰直線分析 (`LogoColor::GetAB`)
+### 統計解析による透明度計算
 ```cpp
+// LogoScan.cpp:336-350 - 回帰分析
 bool LogoColor::GetAB(float& A, float& B, int data_count) const {
-    // 通常方向の回帰直線
-    approxim_line(data_count, sumF, sumB, sumF2, sumFB, A1, B1);
-    // XY入れ替えの回帰直線
-    approxim_line(data_count, sumB, sumF, sumB2, sumFB, A2, B2);
-    
-    // 両方の結果を平均化
-    A = (float)((A1 + (1 / A2)) / 2);
-    B = (float)((B1 + (-B2 / A2)) / 2);
-    
-    // 無効値チェック
+    // 前景色と背景色の関係を回帰直線で近似
+    // Y = A * X + B の形でロゴの透明度を表現
     if (std::isnan(A) || std::isnan(B) || std::isinf(A) || std::isinf(B) || A == 0)
-        return false;
-    
-    return true;
+        return false;  // ←ここで"Insufficient logo frames"の原因
 }
 ```
 
-#### 2.2 ロゴデータ生成
+### 相関計算による特徴点抽出
 ```cpp
-for (int y = 0; y < scanh; y++) {
-    for (int x = 0; x < scanw; x++) {
-        int off = x + y * scanw;
-        if (!logoY[off].GetAB(aY[off], bY[off], nframes)) 
-            return nullptr;  // ← "Insufficient logo frames"エラー
-    }
-}
+// LogoScan.cpp:106-222
+float CalcCorrelation5x5(const float* k, const float* Y, int x, int y, int w, float* pavg)
 ```
+- 各画素周辺の5x5ウィンドウで特徴量を計算
+- AVX/AVX2命令による高速化対応
 
-## エラー解析: "Insufficient logo frames"
+## GUI設定との対応
 
-### エラー発生箇所
+### 閾値パラメータ
+- GUIの 8,10,12,15 は直接 `thy` パラメータに対応
+- 8bit動画の場合: `thy << (8-8) = thy` なので実際の閾値は設定値そのもの
 
-1. **初期ロゴ作成時** (`InitialLogoCreator::readAll`, Line 872)
-2. **ロゴ再生成時** (`LogoAnalyzer::ReMakeLogo`, Line 450)
-
-### エラー原因詳細
-
-#### 1. 背景の不安定性
-- **動きのある背景**: スポーツ中継、ニュース映像
-- **グラデーション背景**: CG背景、アニメーション
-- **ノイズ**: エンコード時の圧縮ノイズ
-
-#### 2. ロゴ周辺の複雑さ
-- **エッジ効果**: ロゴ境界のアンチエイリアシング
-- **色合成**: 半透明ロゴの色混合
-- **インターレース**: フィールド間の色差
-
-#### 3. パラメータ設定
-- **thy値が小さすぎる**: 厳しすぎる背景色判定
-- **スキャン領域**: 不適切な領域設定
-- **フレーム数不足**: 十分なサンプルフレームが収集できない
-
-### 具体的な失敗ケース
-
+### C API インターフェース
 ```cpp
-// Case 1: 回帰直線の傾きが0
-A = 0  // ロゴの透明度情報が取得できない
-
-// Case 2: 数値計算エラー
-A = NaN, B = NaN  // 統計的に無効なデータ
-
-// Case 3: 無限値
-A = ∞, B = ∞  // 分母が0になる計算
+// LogoScan.cpp:1190-1203
+extern "C" AMATSUKAZE_API int ScanLogo(AMTContext * ctx,
+    const tchar * srcpath, int serviceid, const tchar * workfile, const tchar * dstpath,
+    int imgx, int imgy, int w, int h, int thy, int numMaxFrames,
+    logo::LOGO_ANALYZE_CB cb)
 ```
 
-## 対策と改善方法
+## "Insufficient logo frames" エラーの原因
 
-### 1. 映像品質の改善
+### 1. 統計的不十分性
+- **有効フレーム数の不足**: 背景色判定を通過するフレームが少なすぎる
+- **回帰分析の失敗**: 前景・背景の関係が数学的に成立しない
 
-#### JTV-Gen側の対策
+### 2. 生成コンテンツ特有の問題
+- **フレーム間の変化不足**: 静止画的コンテンツで統計的分散が不足
+- **インターレース処理による均一化**: MPEG-2エンコードでノイズが除去されすぎる
+- **色の変動不足**: 回帰分析に必要な多様性の欠如
+
+### 3. testsrc2での問題
+- **ロゴ位置**: 右上部分は高輝度シアン (R:0, G:255, B:255)
+- **コントラスト不足**: 高輝度背景 + 白ロゴ = 判定困難
+
+## 解決策
+
+### 1. 背景パターンの最適化
+- **rgbtestsrc**: RGB色空間のテストパターン、適度な多様性
+- **mandelbrot**: フラクタルパターン（重い処理でキャッシュ警告あり）
+- **gradients**: グラデーションパターン（パラメータ制限あり）
+
+### 2. エンコード設定の調整
 ```bash
-# より安定したロゴパターンの生成
-drawtext=fontsize=36:fontcolor=white@0.8:text='JTV-Gen':x=w-text_w-40:y=40:box=1:boxcolor=black@0.8:boxborderw=5
+# ノイズを意図的に残す設定
+-qcomp 0.8        # より高い値でディテール保持
+-qmin 2 -qmax 15  # 品質範囲の調整
+-noise_reduction 0 # ノイズ除去を無効化
 ```
 
-**改善点:**
-- 一貫した背景色（black@0.8のボックス）
-- 適切なロゴサイズ（36px）
-- 固定位置（右上コーナー）
+### 3. ロゴ配置の最適化
+- **現在**: 右上 `x=w-text_w-40:y=40`
+- **推奨**: 背景が暗い部分への移動（左上、中央左など）
 
-#### 背景パターンの最適化
-```bash
-# テストパターンの安定化
-testsrc2=size=1440x1080:rate=30000/1001:duration=$duration
-```
+## 技術的制約
 
-### 2. パラメータ調整
+### FFmpegフィルタの制限
+- **mandelbrot**: `duration`パラメータ未対応 → `-t`オプション使用必要
+- **gradients**: `nb_frames`パラメータ未対応
+- **testsrc/testsrc2**: ロゴ位置での色が解析に不適切
 
-#### thy値の調整案
-```cpp
-// 現在: thy = 30 (8bit時は12程度)
-// 推奨: thy = 50-100 (より寛容な判定)
-```
+### Amatsukazeの動作条件
+- **最小フレーム数**: 統計解析に十分なサンプル数が必要
+- **背景多様性**: 前景・背景の関係確立に必要な色度・輝度変化
+- **範囲指定**: 手動指定した矩形範囲内のみで解析
 
-#### スキャン領域の最適化
-```cpp
-// ロゴ周辺の安定した領域を選択
-scanx = logo_x - margin;
-scany = logo_y - margin;
-scanw = logo_width + margin * 2;
-scanh = logo_height + margin * 2;
-```
+## 検証方法
 
-### 3. 前処理の実装
+### 1. GUI での確認項目
+- **読み込みフレーム数** (`LogoNumRead`)
+- **有効フレーム数** (`LogoNumValid`)
+- **有効フレーム率** (Valid/Read の比率)
 
-#### デノイズ処理
-```bash
-# FFmpegでのノイズ除去
--vf "hqdn3d=luma_spatial=4:chroma_spatial=3"
-```
+### 2. 成功の指標
+- 有効フレーム率 > 10%
+- 回帰分析での A ≠ 0, NaN, Inf の条件クリア
+- 統計的に十分なサンプル数の確保
 
-#### インターレース処理
-```bash
-# インターレース解除
--vf "yadif=mode=1:parity=auto:deint=interlaced"
-```
+## 結論
 
-## 実装上の注意点
+「Insufficient logo frames」エラーは、生成された映像の統計的均質性が原因。ロゴ解析には：
 
-### 1. メモリ管理
-- `LogoScanDataCompressed`: 大量フレームデータの圧縮保存
-- `std::unique_ptr`: RAII による自動メモリ管理
+1. **適度な背景多様性**: フレーム間での輝度・色度変化
+2. **統計的十分性**: 回帰分析に必要なサンプル数
+3. **前景・背景関係**: 透明度モデル確立に必要な相関
 
-### 2. パフォーマンス最適化
-- **SIMD命令**: AVX/AVX2 による高速相関計算
-- **並列処理**: マルチスレッドでのフレーム解析
-- **メモリアラインメント**: キャッシュ効率の向上
-
-### 3. 精度向上
-- **ビット深度対応**: 8bit/10bit/16bit
-- **色空間**: YUV420p/YUV422p/YUV444p
-- **フィールド処理**: インターレース映像対応
-
-## デバッグ情報
-
-### ログ出力例
-```
-maxi = 8 (67.5%)  // 最適fade値とその確率
-1000 frames       // 処理フレーム数
-LogoScanH450 Message: Insufficient logo frames  // エラーメッセージ
-```
-
-### 診断手順
-1. **フレーム受け入れ率** (`numFrames / totalFrames`)
-2. **背景色変動値** (`abs(tmpY.front() - tmpY.back())`)
-3. **thy閾値との比較** (`variation <= (thy << (bitdepth - 8))`)
-4. **回帰分析結果** (`A != 0, !isnan(A), !isnan(B)`)
-
-## 関連ファイル
-
-- `LogoScan.h`: クラス定義とインターフェース
-- `LogoScan.cpp`: 主要アルゴリズム実装
-- `AMTLogo.h`: ロゴデータ構造体
-- `ComputeKernel.cpp`: SIMD最適化関数
-
-## 参考情報
-
-- **透過性ロゴフィルタプラグイン**: MakKi氏による元実装
-- **MIT License**: Nekopanda氏によるAmatsukaze実装
-- **GitHub**: https://github.com/makiuchi-d/delogo-aviutl
-
----
-
-*このドキュメントは Amatsukaze v0.x.x のソースコード解析に基づいています。*
+が必要である。JTV-Genの改善により、これらの条件を満たす映像生成が可能。

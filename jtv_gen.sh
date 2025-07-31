@@ -316,47 +316,6 @@ FINAL_OUTPUT=""
 # ============================================================================
 # CORE FUNCTIONS
 # ============================================================================
-
-# Generate high-quality logo image with corner markers for logo detection
-generate_logo_image() {
-    local logo_text="$1"
-    local logo_size="$2"
-    local output_path="$3"
-    local logo_opacity="${4:-0.75}"
-    local image_width="${5:-200}"
-    local image_height="${6:-80}"
-    local corner_size="${7:-4}"
-    
-    # 6x super-sampling for high quality logo
-    local logo_size_6x=$((logo_size * 6))
-    local image_width_6x=$((image_width * 6))
-    local image_height_6x=$((image_height * 6))
-    local corner_size_6x=$((corner_size * 6))
-    
-    log "${BLUE}Generating 6x super-sampled logo image: $output_path (${image_width_6x}x${image_height_6x})${NC}"
-    
-    # Generate transparent PNG logo with corner markers - Optimized color space processing
-    ffmpeg -y \
-        -f lavfi -i "color=black:size=${image_width_6x}x${image_height_6x}:rate=1:duration=1" \
-        -vf "drawbox=x=0:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
-             drawbox=x=iw-$corner_size_6x:y=0:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
-             drawbox=x=0:y=ih-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
-             drawbox=x=iw-$corner_size_6x:y=ih-$corner_size_6x:w=$corner_size_6x:h=$corner_size_6x:color=red@1.0:t=fill,
-             drawtext=fontfile='Liberation Sans\:style=Bold':fontsize=$logo_size_6x:fontcolor=white@$logo_opacity:text='$logo_text':x=(w-text_w)/2:y=(h-text_h)/2,
-             colorkey=black:0.5:0.1,
-             format=rgba" \
-        -frames:v 1 -pix_fmt rgba -update 1 \
-        "$output_path" 2>> "$LOG_FILE"
-    
-    if [[ -f "$output_path" ]]; then
-        log "${GREEN}✓ Logo image generated successfully: $output_path${NC}"
-        return 0
-    else
-        log "${RED}Error: Failed to generate logo image${NC}"
-        return 1
-    fi
-}
-
 # Load configuration
 load_config() {
     log "${BLUE}Loading configuration from $CONFIG_FILE${NC}"
@@ -365,6 +324,19 @@ load_config() {
         log "${RED}Error: Configuration file $CONFIG_FILE not found${NC}"
         exit 1
     fi
+
+    # Default variables
+    CONFIG["FRAME_RATE"]=30000/1001
+    CONFIG["VIDEO_WIDTH"]=1440
+    CONFIG["VIDEO_HEIGHT"]=1080
+    CONFIG["VIDEO_CODEC"]=mpeg2video
+    CONFIG["VIDEO_BITRATE"]=15M
+    CONFIG["VIDEO_MAXRATE"]=20M
+    CONFIG["AUDIO_CODEC"]=aac
+    CONFIG["AUDIO_PROFILE"]=aac_low
+    CONFIG["AUDIO_BITRATE"]=248k
+    CONFIG["AUDIO_SAMPLE_RATE"]=48000
+    CONFIG["AUDIO_CHANNELS"]=2
 
     # Load technical settings - simplified approach
     while IFS='=' read -r key value; do
@@ -379,13 +351,13 @@ load_config() {
     done < <(grep '^[A-Z_0-9]*=' "$CONFIG_FILE")
 
     # Set broadcast metadata with defaults if not specified in config
-    CONFIG["BROADCAST_SERVICE_ID"]="${CONFIG[BROADCAST_SERVICE_ID]:-$DEFAULT_SERVICE_ID}"
-    CONFIG["BROADCAST_TRANSPORT_STREAM_ID"]="${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]:-$DEFAULT_TRANSPORT_STREAM_ID}"
-    CONFIG["BROADCAST_ORIGINAL_NETWORK_ID"]="${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]:-$DEFAULT_ORIGINAL_NETWORK_ID}"
-    CONFIG["BROADCAST_SERVICE_NAME"]="${CONFIG[BROADCAST_SERVICE_NAME]:-$DEFAULT_SERVICE_NAME}"
-    CONFIG["BROADCAST_SERVICE_PROVIDER"]="${CONFIG[BROADCAST_SERVICE_PROVIDER]:-$DEFAULT_SERVICE_PROVIDER}"
-    CONFIG["BROADCAST_NETWORK_NAME"]="${CONFIG[BROADCAST_NETWORK_NAME]:-$DEFAULT_NETWORK_NAME}"
-    CONFIG["BROADCAST_START_TIME"]="${CONFIG[BROADCAST_START_TIME]:-$DEFAULT_START_TIME}"
+    CONFIG["BROADCAST_SERVICE_ID"]="${DEFAULT_SERVICE_ID}"
+    CONFIG["BROADCAST_TRANSPORT_STREAM_ID"]="${DEFAULT_TRANSPORT_STREAM_ID}"
+    CONFIG["BROADCAST_ORIGINAL_NETWORK_ID"]="${DEFAULT_ORIGINAL_NETWORK_ID}"
+    CONFIG["BROADCAST_SERVICE_NAME"]="${DEFAULT_SERVICE_NAME}"
+    CONFIG["BROADCAST_SERVICE_PROVIDER"]="${DEFAULT_SERVICE_PROVIDER}"
+    CONFIG["BROADCAST_NETWORK_NAME"]="${DEFAULT_NETWORK_NAME}"
+    CONFIG["BROADCAST_START_TIME"]="${DEFAULT_START_TIME}"
 
     # Load segment structure - now with START_FRAME,END_FRAME format
     local in_segments=false
@@ -403,18 +375,12 @@ load_config() {
         fi
 
         # Only process segment data, not config data
-        if [[ $in_segments == true ]] && [[ "$type" =~ ^(RecMargin|Main|CM)$ ]] && [[ -n "$start_frame" ]] && [[ -n "$end_frame" ]]; then
+        if [[ $in_segments == true ]] && [[ "$type" =~ ^(Main|CM)$ ]] && [[ -n "$start_frame" ]] && [[ -n "$end_frame" ]]; then
             # Validate frame continuity - START must be previous END + 1
             if [[ $prev_end_frame -ge 0 ]] && [[ $start_frame -ne $((prev_end_frame + 1)) ]]; then
                 log "${RED}Error: Frame continuity broken at line $line_num ($type,$name)${NC}"
                 log "${RED}Previous END_FRAME=$prev_end_frame, current START_FRAME=$start_frame${NC}"
                 log "${RED}Expected START_FRAME=$((prev_end_frame + 1)) (previous END + 1)${NC}"
-                exit 1
-            fi
-
-            # Validate start < end (except for RecMargin which can have start == end)
-            if [[ "$type" != "RecMargin" ]] && [[ $start_frame -ge $end_frame ]]; then
-                log "${RED}Error: Invalid frame range at line $line_num: START_FRAME($start_frame) >= END_FRAME($end_frame)${NC}"
                 exit 1
             fi
 
@@ -430,7 +396,6 @@ load_config() {
     local max_end_frame=0
     for segment_data in "${SEGMENTS[@]}"; do
         IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
-        [[ "$type" == "RecMargin" ]] && continue
         if [[ $end_frame -gt $max_end_frame ]]; then
             max_end_frame=$end_frame
         fi
@@ -485,31 +450,9 @@ show_media_specs() {
     local duration_formatted
     duration_formatted=$(printf "%02d:%02d:%02d" $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}/3600)) $(((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%3600)/60)) $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%60)))
 
-    # Video codec display name (MPEG-2 fixed)
-    local video_codec_name="MPEG-2"
-
-    # Audio codec display name
-    local audio_codec_name
-    case "${CONFIG[AUDIO_CODEC]}" in
-        "aac") audio_codec_name="MPEG-2 AAC LC" ;;
-        "mp2") audio_codec_name="MPEG-1 Layer II" ;;
-        *) audio_codec_name="${CONFIG[AUDIO_CODEC]}" ;;
-    esac
-
-    # Audio channels display
-    local audio_channels_text
-    case "${CONFIG[AUDIO_CHANNELS]}" in
-        "1") audio_channels_text="mono" ;;
-        "2") audio_channels_text="stereo" ;;
-        *) audio_channels_text="${CONFIG[AUDIO_CHANNELS]}ch" ;;
-    esac
-
-    # Video format description (interlaced fixed)
-    local video_format="interlaced"
-
-    log "${GREEN}Video:${NC}         $video_codec_name, $video_format, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR 16:9]"
+    log "${GREEN}Video:${NC}         MPEG-2, progressive, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR 16:9]"
     log "               ${CONFIG[FRAME_RATE]} fps, bitrate ${CONFIG[VIDEO_BITRATE]}, maxrate ${CONFIG[VIDEO_MAXRATE]}"
-    log "${GREEN}Audio:${NC}         $audio_codec_name, ${CONFIG[AUDIO_SAMPLE_RATE]}Hz, $audio_channels_text, ${CONFIG[AUDIO_BITRATE]}"
+    log "${GREEN}Audio:${NC}         ${CONFIG[AUDIO_CODEC]}, ${CONFIG[AUDIO_SAMPLE_RATE]}Hz, ${CONFIG[AUDIO_CHANNELS]}ch, ${CONFIG[AUDIO_BITRATE]}"
     log "${GREEN}Duration:${NC}      $duration_formatted (${CONFIG[BROADCAST_DURATION_FRAMES]} frames)"
     log "${GREEN}Broadcast:${NC}     Service ID ${CONFIG[BROADCAST_SERVICE_ID]}, Transport Stream ID ${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
     log "               Service: \"${CONFIG[BROADCAST_SERVICE_NAME]}\" by \"${CONFIG[BROADCAST_SERVICE_PROVIDER]}\""
@@ -614,32 +557,14 @@ generate_main_segment() {
     local segment_name=$1
     local duration=$2
     local output_file=$3
+    local logo_text="JTV-Gen"
+    local logo_size="36"
+    local logo_pos_x="w-text_w-40"
+    local logo_pos_y="40"
+    local logo_box_enabled="1"
+    local logo_box_color="black@0.8"
+    local logo_box_border="-5"
 
-    # Main segment generation with 高品質 logo for stable detection
-    
-    # Logo configuration from config file with ロゴ最適化
-    local logo_text="${CONFIG[LOGO_TEXT]:-JTV-Gen}"
-    local logo_size="${CONFIG[LOGO_SIZE]:-36}"
-    local logo_pos_x="${CONFIG[LOGO_POSITION_X]:-w-text_w-40}"
-    local logo_pos_y="${CONFIG[LOGO_POSITION_Y]:-40}"
-    local logo_box_enabled="${CONFIG[LOGO_BOX_ENABLED]:-1}"
-    local logo_box_color="${CONFIG[LOGO_BOX_COLOR]:-black@0.8}"
-    local logo_box_border="${CONFIG[LOGO_BOX_BORDER]:-5}"
-    
-    # ロゴ安定モード - use solid background for stable logo detection
-    local logo_optimized_mode="${CONFIG[LOGO_OPTIMIZED_MODE]:-true}"
-    local logo_stability="${CONFIG[LOGO_STABILITY_MODE]:-enhanced}"
-    
-    # Debug output for troubleshooting
-    [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${YELLOW}DEBUG: logo_optimized_mode=$logo_optimized_mode, logo_stability=$logo_stability${NC}"
-    
-    [[ "${DEBUG_MODE:-false}" == "true" ]] && log "${GREEN}DEBUG: Using高品質ロゴ生成モード${NC}"
-    # 高品質ロゴ生成モード
-    local bg_color="${CONFIG[LOGO_BG_COLOR]:-gray}"
-    local logo_image_path="$TEMP_DIR/logo.png"
-    
-    # Logo is now drawn directly with drawtext - no image generation needed
-    
     ffmpeg -y \
 	-f lavfi -i "pal75bars=size=1920x1080:rate=${CONFIG[FRAME_RATE]}:duration=$duration,crop=${CONFIG[VIDEO_WIDTH]}:${CONFIG[VIDEO_HEIGHT]}:'24*t':0" \
         -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
@@ -648,7 +573,7 @@ generate_main_segment() {
             drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10,
             drawtext=fontfile='Ubuntu\:style=Bold':fontsize=40:fontcolor=white@0.55:text='JTV-Gen':x=w-text_w-40:y=40:box=0,
             format=yuv420p[v];
-            [1:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a]
+            [1:a]volume=-14dB[a]
         " \
         -map "[v]" -map "[a]" \
         -c:v "${CONFIG[VIDEO_CODEC]}" \
@@ -667,10 +592,7 @@ generate_cm_segment() {
     local segment_name=$1
     local duration=$2
     local output_file=$3
-
-    # CM segment generation (log handled by caller)
-
-    local silence_dur=${CONFIG[CM_SILENCE_DURATION]}
+    local silence_dur=0.5
     local content_dur
     content_dur=$(echo "scale=6; $duration - 2 * $silence_dur" | bc -l)
 
@@ -689,7 +611,7 @@ generate_cm_segment() {
     # CM generation with unified structure: 0.5sec silence + content + 0.5sec silence
     # Minimum CM duration: 15 seconds (as per specification)
     local MIN_CM_DURATION=15.0
-    
+
     # All CMs use the same structure: silence(inverted) -> content(normal) -> silence(inverted)
         ffmpeg -y \
             -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
@@ -700,11 +622,11 @@ generate_cm_segment() {
             -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
             -filter_complex "
                 [0:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
-                [1:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence1];
+                [1:a]volume=-70dB[a_silence1];
                 [2:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
-                [3:a]volume=${CONFIG[AUDIO_LEVEL_0VU]:-"-20"}dB[a_content];
+                [3:a]volume=-14dB[a_content];
                 [4:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
-                [5:a]volume=${CONFIG[AUDIO_SILENCE_THRESHOLD]:-"-70"}dB[a_silence2];
+                [5:a]volume=-70dB[a_silence2];
                 [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated][a];
                 [concatenated]format=yuv420p[v]
             " \
@@ -1507,7 +1429,7 @@ generate_report() {
         echo "- Video:             ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} 16:9 ${CONFIG[FRAME_RATE]}fps"
         echo "- Video Codec:       ${CONFIG[VIDEO_CODEC]} ${CONFIG[VIDEO_BITRATE]}"
         echo "- Audio:             ${CONFIG[AUDIO_SAMPLE_RATE]}Hz ${CONFIG[AUDIO_CHANNELS]}ch ${CONFIG[AUDIO_BITRATE]}"
-        echo "- Audio Levels:      0VU=${CONFIG[AUDIO_LEVEL_0VU]}dBFS, Silence<${CONFIG[AUDIO_SILENCE_THRESHOLD]}dBFS"
+        echo "- Audio Levels:      0VU=-14dBFS, Silence<-70dBFS"
         echo ""
         echo "Broadcast Metadata:"
         echo "- Service ID:        ${CONFIG[BROADCAST_SERVICE_ID]}"
@@ -1715,12 +1637,12 @@ main() {
 
     # Process
     load_config
-    
+
     # Pre-generate directories
     log "${BLUE}Preparing temporary directories${NC}"
     mkdir -p "$TEMP_DIR"
     # Logo generation no longer needed - using direct drawtext rendering
-    
+
     generate_metadata_files
     preview_segments
     generate_segments
