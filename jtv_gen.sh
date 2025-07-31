@@ -509,9 +509,9 @@ preview_segments() {
 
     log "${BLUE}=== Segment Structure Preview ===${NC}"
 
-    # Table header as requested by user
-    printf "%-15s %-20s %-12s %-12s %-25s\n" "SECTION_TYPE" "SECTION_NAME" "START_FRAME" "END_FRAME" "TIMESTAMP"
-    printf "%-15s %-20s %-12s %-12s %-25s\n" "============" "============" "===========" "=========" "======================="
+    # Table header with frame count column
+    printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "SECTION_TYPE" "SECTION_NAME" "START_FRAME" "END_FRAME" "FRAME_COUNT" "TIMESTAMP"
+    printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "============" "============" "===========" "=========" "===========" "======================="
 
     for segment_data in "${SEGMENTS[@]}"; do
         IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
@@ -521,6 +521,9 @@ preview_segments() {
         local end_timecode
         end_timecode=$(frame_to_timecode "$end_frame")
 
+        # Calculate frame count for this segment
+        local frame_count=$((end_frame - start_frame + 1))
+
         # Calculate duration for this segment
         local duration
         duration=$(calculate_duration "$start_frame" "$end_frame")
@@ -528,7 +531,7 @@ preview_segments() {
         local formatted_duration
         formatted_duration=$(printf "%7.3f" "$duration")
 
-        printf "%-15s %-20s %-12s %-12s %-25s\n" "$type" "$name" "$start_frame" "$end_frame" "$start_timecode - $end_timecode (${formatted_duration}s)"
+        printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "$type" "$name" "$start_frame" "$end_frame" "$frame_count" "$start_timecode - $end_timecode (${formatted_duration}s)"
     done
 
     log ""
@@ -557,16 +560,9 @@ generate_main_segment() {
     local segment_name=$1
     local duration=$2
     local output_file=$3
-    local logo_text="JTV-Gen"
-    local logo_size="36"
-    local logo_pos_x="w-text_w-40"
-    local logo_pos_y="40"
-    local logo_box_enabled="1"
-    local logo_box_color="black@0.8"
-    local logo_box_border="-5"
 
     ffmpeg -y \
-	-f lavfi -i "pal75bars=size=1920x1080:rate=${CONFIG[FRAME_RATE]}:duration=$duration,crop=${CONFIG[VIDEO_WIDTH]}:${CONFIG[VIDEO_HEIGHT]}:'24*t':0" \
+        -f lavfi -i "pal75bars=size=1920x1080:rate=${CONFIG[FRAME_RATE]}:duration=$duration,crop=${CONFIG[VIDEO_WIDTH]}:${CONFIG[VIDEO_HEIGHT]}:'24*t':0" \
         -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
         -filter_complex "
             [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
@@ -576,8 +572,8 @@ generate_main_segment() {
             [1:a]volume=-14dB[a]
         " \
         -map "[v]" -map "[a]" \
-        -c:v "${CONFIG[VIDEO_CODEC]}" \
-        -aspect 16:9 \
+        -c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 \
+        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" \
         -r "${CONFIG[FRAME_RATE]}" -field_order progressive \
         -profile:v main -level:v high \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
@@ -608,38 +604,34 @@ generate_cm_segment() {
     local color_index=$(( (0x$color_hash) % ${#colors[@]}))
     local color="${colors[$color_index]}"
 
-    # CM generation with unified structure: 0.5sec silence + content + 0.5sec silence
-    # Minimum CM duration: 15 seconds (as per specification)
-    local MIN_CM_DURATION=15.0
-
     # All CMs use the same structure: silence(inverted) -> content(normal) -> silence(inverted)
-        ffmpeg -y \
-            -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
-            -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
-            -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$content_dur" \
-            -f lavfi -i "sine=frequency=800:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$content_dur,aformat=channel_layouts=stereo" \
-            -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
-            -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
-            -filter_complex "
-                [0:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
-                [1:a]volume=-70dB[a_silence1];
-                [2:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
-                [3:a]volume=-14dB[a_content];
-                [4:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
-                [5:a]volume=-70dB[a_silence2];
-                [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated][a];
-                [concatenated]format=yuv420p[v]
-            " \
-            -map "[v]" -map "[a]" \
-            -c:v "${CONFIG[VIDEO_CODEC]}" \
-            -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" -aspect 16:9 \
-            -r "${CONFIG[FRAME_RATE]}" -field_order progressive \
-            -profile:v main -level:v high \
-            -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-            -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
-            -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
-            -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-            -f mpegts "$output_file" 2>> "$LOG_FILE"
+    ffmpeg -y \
+        -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
+        -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
+        -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$content_dur" \
+        -f lavfi -i "sine=frequency=800:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$content_dur,aformat=channel_layouts=stereo" \
+        -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
+        -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
+        -filter_complex "
+            [0:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
+            [1:a]volume=-70dB[a_silence1];
+            [2:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
+            [3:a]volume=-14dB[a_content];
+            [4:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
+            [5:a]volume=-70dB[a_silence2];
+            [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated][a];
+            [concatenated]format=yuv420p[v]
+        " \
+        -map "[v]" -map "[a]" \
+        -c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 \
+        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" \
+        -r "${CONFIG[FRAME_RATE]}" -field_order progressive \
+        -profile:v main -level:v high \
+        -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
+        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+        -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
+        -f mpegts "$output_file" 2>> "$LOG_FILE"
 }
 
 # Calculate optimal number of parallel jobs
@@ -676,7 +668,7 @@ sort_segments_by_frames() {
     done
 
     # Sort by frame count (descending)
-    IFS=$'\n' sorted_array=($(printf '%s\n' "${segments_with_counts[@]}" | sort -nr))
+    mapfile -t sorted_array < <(printf '%s\n' "${segments_with_counts[@]}" | sort -nr)
 
     # Extract sorted segments
     for entry in "${sorted_array[@]}"; do
@@ -793,20 +785,20 @@ generate_segments() {
         # Wait if we've reached max jobs
         while [[ $active_jobs -ge $max_jobs ]]; do
             # Check for completed jobs
-            for i in "${!pids[@]}"; do
-                local pid="${pids[$i]}"
-                local seg_index="${segment_indices[$i]}"
+            for j in "${!pids[@]}"; do
+                local pid="${pids[$j]}"
+                local seg_index="${segment_indices[$j]}"
                 if ! kill -0 "$pid" 2>/dev/null; then
                     # Job finished, remove from active list
-                    unset "pids[$i]"
-                    unset "segment_indices[$i]"
+                    unset "pids[$j]"
+                    unset "segment_indices[$j]"
                     active_jobs=$((active_jobs - 1))
 
                     # Check for completion or error
                     if [[ -f "$TEMP_DIR/completed_$seg_index" ]]; then
                         local completion_info
                         completion_info=$(cat "$TEMP_DIR/completed_$seg_index")
-                        IFS=':' read -r status comp_index comp_name comp_frames <<< "$completion_info"
+                        IFS=':' read -r _ _ comp_name _ <<< "$completion_info"
                         completed_jobs=$((completed_jobs + 1))
                         update_progress "$completed_jobs" "$total_segments" "$comp_name"
                     elif [[ -f "$TEMP_DIR/error_$seg_index" ]]; then
@@ -825,10 +817,10 @@ generate_segments() {
             # Clean up the pids array
             local temp_pids=()
             local temp_indices=()
-            for i in "${!pids[@]}"; do
-                if [[ -n "${pids[$i]}" ]]; then
-                    temp_pids+=("${pids[$i]}")
-                    temp_indices+=("${segment_indices[$i]}")
+            for k in "${!pids[@]}"; do
+                if [[ -n "${pids[$k]}" ]]; then
+                    temp_pids+=("${pids[$k]}")
+                    temp_indices+=("${segment_indices[$k]}")
                 fi
             done
             pids=("${temp_pids[@]}")
@@ -852,20 +844,20 @@ generate_segments() {
     # Wait for all remaining jobs to complete
     log "${BLUE}Waiting for remaining jobs to complete...${NC}"
     while [[ $completed_jobs -lt $total_segments ]]; do
-        for i in "${!pids[@]}"; do
-            local pid="${pids[$i]}"
-            local seg_index="${segment_indices[$i]}"
+        for m in "${!pids[@]}"; do
+            local pid="${pids[$m]}"
+            local seg_index="${segment_indices[$m]}"
             if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
                 # Job finished
-                unset "pids[$i]"
-                unset "segment_indices[$i]"
+                unset "pids[$m]"
+                unset "segment_indices[$m]"
                 active_jobs=$((active_jobs - 1))
 
                 # Check for completion or error
                 if [[ -f "$TEMP_DIR/completed_$seg_index" ]]; then
                     local completion_info
                     completion_info=$(cat "$TEMP_DIR/completed_$seg_index")
-                    IFS=':' read -r status comp_index comp_name comp_frames <<< "$completion_info"
+                    IFS=':' read -r _ _ comp_name _ <<< "$completion_info"
                     completed_jobs=$((completed_jobs + 1))
                     update_progress "$completed_jobs" "$total_segments" "$comp_name"
                 elif [[ -f "$TEMP_DIR/error_$seg_index" ]]; then
@@ -912,9 +904,9 @@ concatenate_segments() {
 
     # Sort segment files by their numeric index to maintain config order
     for i in $(seq -f "%03g" 0 999); do
-        local file="$TEMP_DIR/segment_${i}_"*.ts
-        if compgen -G "$file" > /dev/null; then
-            for matched_file in $file; do
+        local file_pattern="$TEMP_DIR/segment_${i}_*.ts"
+        if compgen -G "$file_pattern" > /dev/null; then
+            for matched_file in $file_pattern; do
                 if [[ -f "$matched_file" ]]; then
                     echo "file '../$matched_file'" >> "$concat_file"
                 fi
