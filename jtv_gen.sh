@@ -13,9 +13,20 @@ set -euo pipefail
 cleanup_on_exit() {
     local exit_code=$?
 
+    # Check if we're being called from a trap
+    local from_trap=false
+    if [[ "${BASH_SUBSHELL}" == "0" ]] && [[ -n "${BASH_LINENO[1]}" ]]; then
+        from_trap=true
+    fi
+
     if [[ $exit_code -ne 0 ]]; then
         log "${RED}Script interrupted or failed (exit code: $exit_code)${NC}"
     fi
+
+    # Reset terminal state - always do this to ensure proper cleanup
+    stty sane 2>/dev/null || true
+    tput sgr0 2>/dev/null || true  # Reset terminal attributes
+    printf "\n"  # Ensure prompt appears on new line
 
     # Clean up temporary files if they exist
     if [[ -d "$TEMP_DIR" ]]; then
@@ -47,11 +58,34 @@ cleanup_on_exit() {
         fi
     fi
 
-    exit $exit_code
+    # Reset terminal one more time before final exit
+    if [[ "$from_trap" == false ]]; then
+        # Final terminal reset to ensure prompt visibility
+        stty sane 2>/dev/null || true
+        tput sgr0 2>/dev/null || true
+        printf "\n"  # Extra newline for prompt
+        exit $exit_code
+    fi
+}
+
+# Signal handler for interruption (INT/TERM)
+handle_interrupt() {
+    local signal=$1
+    log "${YELLOW}Received signal $signal - initiating cleanup...${NC}"
+
+    # Reset terminal state immediately and thoroughly
+    stty sane 2>/dev/null || true
+    tput sgr0 2>/dev/null || true  # Reset terminal attributes
+    printf "\n"  # Ensure clean line for prompt
+
+    # Set exit code for cleanup function
+    exit 130  # Standard exit code for Ctrl+C
 }
 
 # Set up trap handlers
-trap cleanup_on_exit EXIT INT TERM
+trap cleanup_on_exit EXIT
+trap 'handle_interrupt INT' INT
+trap 'handle_interrupt TERM' TERM
 
 # ============================================================================
 # GLOBAL CONFIGURATION AND VARIABLES
@@ -413,8 +447,9 @@ load_config() {
 calculate_duration() {
     local start_frame=$1
     local end_frame=$2
-    local fps_num=30000
-    local fps_den=1001
+    local frame_rate=(${CONFIG["FRAME_RATE"]//// })
+    local fps_num=${frame_rate[0]}
+    local fps_den=${frame_rate[1]}
 
     local frame_count=$((end_frame - start_frame))
     local duration
@@ -562,14 +597,14 @@ generate_main_segment() {
     local output_file=$3
 
     ffmpeg -y \
-        -f lavfi -i "pal75bars=size=1920x1080:rate=${CONFIG[FRAME_RATE]}:duration=$duration,crop=${CONFIG[VIDEO_WIDTH]}:${CONFIG[VIDEO_HEIGHT]}:'24*t':0" \
-        -f lavfi -i "sine=frequency=1000:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$duration,aformat=channel_layouts=stereo" \
+        -f lavfi -i "pal75bars=size=1920x1080:rate=${CONFIG[FRAME_RATE]}:duration=$duration,crop=${CONFIG[VIDEO_WIDTH]}:${CONFIG[VIDEO_HEIGHT]}:'mod(24*t,1920-${CONFIG[VIDEO_WIDTH]})':0" \
+        -f lavfi -i "anoisesrc=c=pink:r=${CONFIG[AUDIO_SAMPLE_RATE]}:d=$duration,equalizer=f=200:width_type=o:width=1:g=3,aformat=channel_layouts=stereo" \
         -filter_complex "
             [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
             drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10,
-            drawtext=fontfile='Ubuntu\:style=Bold':fontsize=40:fontcolor=white@0.55:text='JTV-Gen':x=w-text_w-40:y=40:box=0,
+            drawtext=fontfile='Ubuntu\:style=Bold':fontsize=40:fontcolor=white@0.35:text='JTV-Gen':x=w-text_w-40:y=40:box=0,
             format=yuv420p[v];
-            [1:a]volume=-14dB[a]
+            [1:a]volume=-14dB,alimiter=limit=-3dB:attack=5:release=50[a]
         " \
         -map "[v]" -map "[a]" \
         -c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 \
@@ -578,7 +613,7 @@ generate_main_segment() {
         -profile:v main -level:v high \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
         -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
-        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -aac_coder twoloop \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         -f mpegts "$output_file" 2>> "$LOG_FILE"
 }
@@ -609,14 +644,14 @@ generate_cm_segment() {
         -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
         -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
         -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$content_dur" \
-        -f lavfi -i "sine=frequency=800:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$content_dur,aformat=channel_layouts=stereo" \
+        -f lavfi -i "anoisesrc=c=white:r=${CONFIG[AUDIO_SAMPLE_RATE]}:d=$content_dur,equalizer=f=4000:width_type=o:width=1:g=2,aformat=channel_layouts=stereo" \
         -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
         -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
         -filter_complex "
             [0:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
             [1:a]volume=-70dB[a_silence1];
             [2:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
-            [3:a]volume=-14dB[a_content];
+            [3:a]volume=-14dB,alimiter=limit=-3dB:attack=5:release=50[a_content];
             [4:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
             [5:a]volume=-70dB[a_silence2];
             [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated][a];
@@ -629,7 +664,7 @@ generate_cm_segment() {
         -profile:v main -level:v high \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
         -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
-        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -aac_coder twoloop \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         -f mpegts "$output_file" 2>> "$LOG_FILE"
 }
