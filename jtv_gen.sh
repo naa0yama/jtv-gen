@@ -222,7 +222,7 @@ OPTIONS:
     --debug              Enable verbose debug output
     -c, --config FILE    Configuration file (default: scene_1.conf)
     -y, --yes           Skip confirmation prompt and start generation immediately
-    --skip-eit          Skip EIT/SDT/TDT metadata injection (default: inject metadata with TSDuck)
+    --skip-eit          Skip EIT/SDT/TOT metadata injection (default: inject metadata with TSDuck)
     -h, --help          Show this comprehensive help message
 
 EXAMPLES:
@@ -364,8 +364,10 @@ load_config() {
     CONFIG["VIDEO_WIDTH"]=1440
     CONFIG["VIDEO_HEIGHT"]=1080
     CONFIG["VIDEO_CODEC"]=mpeg2video
-    CONFIG["VIDEO_BITRATE"]=15M
-    CONFIG["VIDEO_MAXRATE"]=20M
+    CONFIG["VIDEO_BITRATE_MIN"]=8M
+    CONFIG["VIDEO_BITRATE_AVG"]=15M
+    CONFIG["VIDEO_BITRATE_MAX"]=20M
+
     CONFIG["AUDIO_CODEC"]=aac
     CONFIG["AUDIO_PROFILE"]=aac_low
     CONFIG["AUDIO_BITRATE"]=248k
@@ -486,7 +488,7 @@ show_media_specs() {
     duration_formatted=$(printf "%02d:%02d:%02d" $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}/3600)) $(((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%3600)/60)) $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%60)))
 
     log "${GREEN}Video:${NC}         MPEG-2, progressive, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR 16:9]"
-    log "               ${CONFIG[FRAME_RATE]} fps, bitrate ${CONFIG[VIDEO_BITRATE]}, maxrate ${CONFIG[VIDEO_MAXRATE]}"
+    log "              ${CONFIG[FRAME_RATE]} fps, bitrate min ${CONFIG[VIDEO_BITRATE_MIN]}, avg ${CONFIG[VIDEO_BITRATE_AVG]}, maxrate ${CONFIG[VIDEO_BITRATE_MAX]}"
     log "${GREEN}Audio:${NC}         ${CONFIG[AUDIO_CODEC]}, ${CONFIG[AUDIO_SAMPLE_RATE]}Hz, ${CONFIG[AUDIO_CHANNELS]}ch, ${CONFIG[AUDIO_BITRATE]}"
     log "${GREEN}Duration:${NC}      $duration_formatted (${CONFIG[BROADCAST_DURATION_FRAMES]} frames)"
     log "${GREEN}Broadcast:${NC}     Service ID ${CONFIG[BROADCAST_SERVICE_ID]}, Transport Stream ID ${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
@@ -503,8 +505,9 @@ show_media_specs() {
 # Convert frame number to HH:MM:SS.FF format
 frame_to_timecode() {
     local frame=$1
-    local fps_num=30000
-    local fps_den=1001
+    local frame_rate=(${CONFIG["FRAME_RATE"]//// })
+    local fps_num=${frame_rate[0]}
+    local fps_den=${frame_rate[1]}
     local fps
     fps=$(echo "scale=6; $fps_num / $fps_den" | bc -l)
 
@@ -608,11 +611,9 @@ generate_main_segment() {
         " \
         -map "[v]" -map "[a]" \
         -c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 \
-        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" \
-        -r "${CONFIG[FRAME_RATE]}" -field_order progressive \
         -profile:v main -level:v high \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
+        -minrate "${CONFIG[VIDEO_BITRATE_MIN]}" -b:v "${CONFIG[VIDEO_BITRATE_AVG]}" -maxrate "${CONFIG[VIDEO_BITRATE_MAX]}" -bufsize 9781248 \
         -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -strict -2 -aac_coder twoloop \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         -f mpegts "$output_file" 2>> "$LOG_FILE"
@@ -659,11 +660,9 @@ generate_cm_segment() {
         " \
         -map "[v]" -map "[a]" \
         -c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 \
-        -s "${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}" \
-        -r "${CONFIG[FRAME_RATE]}" -field_order progressive \
         -profile:v main -level:v high \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-        -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
+        -minrate "${CONFIG[VIDEO_BITRATE_MIN]}" -b:v "${CONFIG[VIDEO_BITRATE_AVG]}" -maxrate "${CONFIG[VIDEO_BITRATE_MAX]}" -bufsize 9781248 \
         -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -strict -2 -aac_coder twoloop \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         -f mpegts "$output_file" 2>> "$LOG_FILE"
@@ -1084,14 +1083,6 @@ EOF
 </tsduck>
 EOF
 
-    # Generate TDT file with JST support
-    local tdt_file="$TEMP_DIR/tdt.xml"
-    cat > "$tdt_file" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<tsduck>
-  <TDT UTC_time="${CONFIG[BROADCAST_START_TIME]}"/>
-</tsduck>
-EOF
 
     # Generate TOT file with JST offset
     local tot_file="$TEMP_DIR/tot.xml"
@@ -1117,7 +1108,6 @@ EOF
     log "${GREEN}  NIT:${NC}         temp/nit.xml (Network Information Table)"
     log "${GREEN}  SDT:${NC}         temp/sdt.xml (Service Description Table)"
     log "${GREEN}  EIT:${NC}         temp/eit.xml (Event Information Table)"
-    log "${GREEN}  TDT:${NC}         temp/tdt.xml (Time and Date Table)"
     log "${GREEN}  TOT:${NC}         temp/tot.xml (Time Offset Table)"
 }
 
@@ -1142,7 +1132,7 @@ inject_eit_metadata() {
 
     # Compile XML tables to binary
     log "${YELLOW}Compiling PSI/SI tables${NC}"
-    local required_tables=("pat" "cat" "pmt" "nit" "sdt" "eit" "tdt" "tot")
+    local required_tables=("pat" "cat" "pmt" "nit" "sdt" "eit" "tot")
     for table in "${required_tables[@]}"; do
         if [[ -f "$tables_dir/${table}.xml" ]]; then
             log "${BLUE}Compiling ${table}.xml${NC}"
@@ -1166,7 +1156,7 @@ inject_eit_metadata() {
 
     # Check which tables are available (comprehensive PSI/SI)
     local available_tables=()
-    for table in pat cat pmt nit sdt eit tdt tot; do
+    for table in pat cat pmt nit sdt eit tot; do
         if [[ -f "$tables_dir/${table}.bin" ]]; then
             available_tables+=("$table")
             log "${GREEN}✓ ${table}.bin ready for injection${NC}"
@@ -1212,11 +1202,9 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 250"
         fi
 
-        # TOT/TDT injection (PID 20) - based on terrestrial TV analysis: ~10 seconds
+        # TOT injection (PID 20) - based on terrestrial TV analysis: ~10 seconds
         if [[ -f "$tables_dir/tot.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 2500"
-        elif [[ -f "$tables_dir/tdt.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tdt.bin\" --pid 20 --inter-packet 2500"
         fi
 
         # PMT injection (PID 257) - program definition
@@ -1264,11 +1252,9 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 250"
         fi
 
-        # TOT/TDT injection (PID 20) - based on terrestrial TV analysis: ~10 seconds
+        # TOT injection (PID 20) - based on terrestrial TV analysis: ~10 seconds
         if [[ -f "$tables_dir/tot.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 2500"
-        elif [[ -f "$tables_dir/tdt.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tdt.bin\" --pid 20 --inter-packet 2500"
         fi
 
         # PMT injection (PID 257)
@@ -1302,7 +1288,7 @@ inject_eit_metadata() {
         if command -v tsanalyze >/dev/null 2>&1; then
             log "${BLUE}Analyzing injected tables:${NC}"
             local verification_output
-            verification_output=$(tsanalyze "$input_file" 2>/dev/null | grep -E "(EIT|SDT|TDT|TOT)" || true)
+            verification_output=$(tsanalyze "$input_file" 2>/dev/null | grep -E "(EIT|SDT|TOT)" || true)
             if [[ -n "$verification_output" ]]; then
                 echo "$verification_output"
                 if echo "$verification_output" | grep -q "EIT"; then
@@ -1310,10 +1296,10 @@ inject_eit_metadata() {
                 else
                     log "${YELLOW}⚠ EIT table not detected in analysis${NC}"
                 fi
-                if echo "$verification_output" | grep -q -E "(TDT|TOT)"; then
-                    log "${GREEN}✓ Time table detected - time information should be available${NC}"
+                if echo "$verification_output" | grep -q "TOT"; then
+                    log "${GREEN}✓ TOT table detected - time information should be available${NC}"
                 else
-                    log "${YELLOW}⚠ Time table not detected in analysis${NC}"
+                    log "${YELLOW}⚠ TOT table not detected in analysis${NC}"
                 fi
             else
                 log "${YELLOW}⚠ No PSI/SI tables detected in analysis${NC}"
@@ -1459,7 +1445,7 @@ generate_report() {
         echo ""
         echo "Technical Specifications:"
         echo "- Video:             ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} 16:9 ${CONFIG[FRAME_RATE]}fps"
-        echo "- Video Codec:       ${CONFIG[VIDEO_CODEC]} ${CONFIG[VIDEO_BITRATE]}"
+        echo "- Video Codec:       ${CONFIG[VIDEO_CODEC]} avg ${CONFIG[VIDEO_BITRATE_AVG]}"
         echo "- Audio:             ${CONFIG[AUDIO_SAMPLE_RATE]}Hz ${CONFIG[AUDIO_CHANNELS]}ch ${CONFIG[AUDIO_BITRATE]}"
         echo "- Audio Levels:      0VU=-14dBFS, Silence<-70dBFS"
         echo ""
@@ -1477,7 +1463,7 @@ generate_report() {
             echo "- EIT Status:        Disabled (--skip-eit specified)"
         fi
         echo ""
-        echo "EIT/SDT/TDT Metadata Files:"
+        echo "EIT/SDT/TOT Metadata Files:"
         if [[ -f "$TEMP_DIR/eit.xml" ]]; then
             echo "- EIT (Event Information Table):     Generated"
             echo "  File: $TEMP_DIR/eit.xml"
@@ -1496,12 +1482,12 @@ generate_report() {
         else
             echo "- SDT (Service Description Table):   Not generated"
         fi
-        if [[ -f "$TEMP_DIR/tdt.xml" ]]; then
-            echo "- TDT (Time and Date Table):         Generated"
-            echo "  File: $TEMP_DIR/tdt.xml"
+        if [[ -f "$TEMP_DIR/tot.xml" ]]; then
+            echo "- TOT (Time Offset Table):           Generated"
+            echo "  File: $TEMP_DIR/tot.xml"
             echo "  Status: Injected into final output"
         else
-            echo "- TDT (Time and Date Table):         Not generated"
+            echo "- TOT (Time Offset Table):           Not generated"
         fi
         echo ""
         echo "Segment Structure:"
