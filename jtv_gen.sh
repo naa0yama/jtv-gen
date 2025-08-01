@@ -613,7 +613,7 @@ generate_main_segment() {
         -profile:v main -level:v high \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
         -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
-        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -aac_coder twoloop \
+        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -strict -2 -aac_coder twoloop \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         -f mpegts "$output_file" 2>> "$LOG_FILE"
 }
@@ -664,7 +664,7 @@ generate_cm_segment() {
         -profile:v main -level:v high \
         -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
         -b:v "${CONFIG[VIDEO_BITRATE]}" -maxrate "${CONFIG[VIDEO_MAXRATE]}" -minrate 8M -bufsize 9781248 \
-        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -aac_coder twoloop \
+        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -strict -2 -aac_coder twoloop \
         -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
         -f mpegts "$output_file" 2>> "$LOG_FILE"
 }
@@ -1279,8 +1279,13 @@ inject_eit_metadata() {
         tsp_cmd="$tsp_cmd -P continuity --fix -O file \"$output_file\""
 
         log "${BLUE}Executing: $tsp_cmd${NC}"
-        eval "$tsp_cmd" 2>&1 | tee -a "$LOG_FILE"
-        local injection_result=${PIPESTATUS[0]}
+        if [[ -n "$LOG_FILE" ]]; then
+            eval "$tsp_cmd" 2>&1 | tee -a "$LOG_FILE"
+            local injection_result=${PIPESTATUS[0]}
+        else
+            eval "$tsp_cmd"
+            local injection_result=$?
+        fi
 
         if [[ $injection_result -ne 0 ]]; then
             log "${RED}Error: TSDuck injection failed with exit code $injection_result${NC}"
