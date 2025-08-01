@@ -364,9 +364,9 @@ load_config() {
     CONFIG["VIDEO_WIDTH"]=1440
     CONFIG["VIDEO_HEIGHT"]=1080
     CONFIG["VIDEO_CODEC"]=mpeg2video
-    CONFIG["VIDEO_BITRATE_MIN"]=8M
-    CONFIG["VIDEO_BITRATE_AVG"]=15M
-    CONFIG["VIDEO_BITRATE_MAX"]=20M
+    CONFIG["VIDEO_BITRATE_MIN"]=1M
+    CONFIG["VIDEO_BITRATE_AVG"]=6M
+    CONFIG["VIDEO_BITRATE_MAX"]=12M
 
     CONFIG["AUDIO_CODEC"]=aac
     CONFIG["AUDIO_PROFILE"]=aac_low
@@ -958,7 +958,7 @@ concatenate_segments() {
         -metadata service_name="${CONFIG[BROADCAST_SERVICE_NAME]}" \
         -mpegts_pmt_start_pid 257 \
         -mpegts_start_pid 273 \
-        -muxrate 15M \
+        -muxrate "${CONFIG[VIDEO_BITRATE_AVG]}" \
         -mpegts_flags +initial_discontinuity \
         -f mpegts \
         "$TEMP_DIR/$FINAL_OUTPUT" 2>> "$LOG_FILE"
@@ -1177,7 +1177,7 @@ inject_eit_metadata() {
         log "${BLUE}Using comprehensive PSI/SI injection${NC}"
         local tsp_cmd="tsp --japan -I file \"$input_file\""
 
-        # PAT injection (PID 0) - critical foundation table
+        # PAT injection (PID 0) - critical foundation table (replace existing)
         if [[ -f "$tables_dir/pat.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pat.bin\" --pid 0 --replace"
         fi
@@ -1192,7 +1192,7 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet 250"
         fi
 
-        # SDT injection (PID 17) - based on terrestrial TV analysis: ~2 seconds
+        # SDT injection (PID 17) - service description (replace existing)
         if [[ -f "$tables_dir/sdt.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/sdt.bin\" --pid 17 --replace"
         fi
@@ -1202,12 +1202,12 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 250"
         fi
 
-        # TOT injection (PID 20) - based on terrestrial TV analysis: ~10 seconds
+        # TOT injection (PID 20) - based on terrestrial TV analysis: ~5 seconds
         if [[ -f "$tables_dir/tot.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 2500"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 1250"
         fi
 
-        # PMT injection (PID 257) - program definition
+        # PMT injection (PID 257) - program definition (replace existing)
         if [[ -f "$tables_dir/pmt.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pmt.bin\" --pid 257 --replace"
         fi
@@ -1227,7 +1227,7 @@ inject_eit_metadata() {
         log "${BLUE}Using standard mode comprehensive PSI/SI injection${NC}"
         local tsp_cmd="tsp --japan -I file \"$input_file\""
 
-        # PAT injection (PID 0)
+        # PAT injection (PID 0) - replace existing
         if [[ -f "$tables_dir/pat.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pat.bin\" --pid 0 --replace"
         fi
@@ -1242,7 +1242,7 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet 250"
         fi
 
-        # SDT injection (PID 17) - based on terrestrial TV analysis: ~2 seconds
+        # SDT injection (PID 17) - service description (replace existing)
         if [[ -f "$tables_dir/sdt.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/sdt.bin\" --pid 17 --replace"
         fi
@@ -1252,12 +1252,12 @@ inject_eit_metadata() {
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 250"
         fi
 
-        # TOT injection (PID 20) - based on terrestrial TV analysis: ~10 seconds
+        # TOT injection (PID 20) - based on terrestrial TV analysis: ~5 seconds
         if [[ -f "$tables_dir/tot.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 2500"
+            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 1250"
         fi
 
-        # PMT injection (PID 257)
+        # PMT injection (PID 257) - replace existing
         if [[ -f "$tables_dir/pmt.bin" ]]; then
             tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pmt.bin\" --pid 257 --replace"
         fi

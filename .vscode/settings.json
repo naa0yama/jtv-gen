@@ -1,0 +1,6 @@
+{
+  "files.watcherExclude": {
+    "**/output/**": true,
+    "**/temp/**": true
+  }
+}
