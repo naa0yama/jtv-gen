@@ -1175,7 +1175,7 @@ inject_eit_metadata() {
     if [[ "$optimized_mode" == "true" ]]; then
         # Comprehensive PSI/SI injection
         log "${BLUE}Using comprehensive PSI/SI injection${NC}"
-        local tsp_cmd="tsp --japan -I file \"$input_file\""
+        local tsp_cmd="tsp --japan -I file \"$input_file\" -P pcradjust -P timeref"
 
         # PAT injection (PID 0) - critical foundation table (replace existing)
         if [[ -f "$tables_dir/pat.bin" ]]; then
