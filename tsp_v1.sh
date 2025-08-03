@@ -152,6 +152,10 @@ EOF
 #   NIT 0x0010( 16)
 #   EIT 0x0012( 18)
 #   TOT 0x0014( 20)
+#     --inter-packet 25    #   25 * 4ms ≈ 100ms
+#     --inter-packet 250   #  250 * 4ms ≈ 1s
+#     --inter-packet 1250  # 1250 * 4ms ≈ 5s
+#     --inter-packet 2500  # 2500 * 4ms ≈ 10s
 # replace
 #   PAT 0x0000(  0)
 #   SDT 0x0011( 17)
@@ -160,3 +164,16 @@ EOF
 #tsp --japan -I file temp/combined.ts \
 #    -O file final_v1.ts
 #tsanalyze final_v1.ts
+
+#```bash
+## 基本テーブル（高頻度注入）
+#tsp --japan -I file input.ts \
+#  -P inject pat.bin --pid 0 --replace \
+#  -P inject pmt.bin --pid 257 --replace \
+#  -P inject sdt.bin --pid 17 --inter-packet 2500 \
+#  -P inject eit.bin --pid 18 --inter-packet 250 \
+#  -P inject nit.bin --pid 16 --inter-packet 250 \
+#  -P inject tot.bin --pid 20 --inter-packet 1250 \
+#  -P continuity --fix \
+#  -O file output.ts
+#```
