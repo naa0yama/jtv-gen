@@ -1,5 +1,6 @@
+.history/*
+*.ts
 Amatsukaze/
 output/
 temp/
 tv_generation.log
-*.ts

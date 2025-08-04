@@ -956,10 +956,9 @@ concatenate_segments() {
         -mpegts_transport_stream_id "${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}" \
         -metadata service_provider="${CONFIG[BROADCAST_SERVICE_PROVIDER]}" \
         -metadata service_name="${CONFIG[BROADCAST_SERVICE_NAME]}" \
-        -mpegts_pmt_start_pid 257 \
         -mpegts_start_pid 273 \
+        -mpegts_pmt_start_pid 257 \
         -muxrate "${CONFIG[VIDEO_BITRATE_AVG]}" \
-        -mpegts_flags +initial_discontinuity \
         -f mpegts \
         "$TEMP_DIR/$FINAL_OUTPUT" 2>> "$LOG_FILE"
 
@@ -1044,7 +1043,7 @@ EOF
        type="pf">
     <event event_id="1001"
            start_time="${CONFIG[BROADCAST_START_TIME]}"
-           duration="$duration_hms"
+           duration="${duration_hms}"
            running_status="running"
            CA_mode="false">
       <short_event_descriptor language_code="jpn">
@@ -1281,7 +1280,7 @@ inject_eit_metadata() {
 
     # Result verification
     if [[ -f "$output_file" ]] && [[ -s "$output_file" ]]; then
-        mv "$output_file" "$input_file"
+        cp -v "$output_file" "$input_file"
         log "${GREEN}Optimized PSI/SI metadata injection completed successfully${NC}"
 
         # Enhanced verification with detailed output

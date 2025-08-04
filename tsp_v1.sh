@@ -7,9 +7,10 @@ set -euxo pipefail
 
 INTERVAL=29
 VIDEO_OPT="-minrate 1M -b:v 6M -maxrate 12M"
+WORKDIR=temp/v1
 
-rm -rfv temp/combined.ts final_v1.ts
-mkdir -p temp
+rm -rfv "${WORKDIR}/combined.ts" final_v1.ts
+mkdir -p "${WORKDIR}"
 
 dump_psi() {
   local filename="${1}"
@@ -22,11 +23,11 @@ dump_psi() {
     '0x0101,pmt'
   )
 
-  mkdir -p temp/psi
+  mkdir -p "${WORKDIR}/psi"
   for item in "${pids[@]}"; do
     IFS=',' read -r pid name <<< "$item"
     echo "tstables, PID: $pid, Name: $name"
-    tstables --japan --pid $pid --xml-output  "temp/psi/${name}.xml" "$filename"
+    tstables --japan --pid $pid --xml-output  "${WORKDIR}/psi/${name}.xml" "$filename"
   done
 }
 #dump_psi "original_6min.ts"
@@ -35,7 +36,7 @@ dump_psi() {
 generate_test_file() {
     local filename="$1"
 
-    if [ ! -f "temp/${filename}" ]; then
+    if [ ! -f "${WORKDIR}/${filename}" ]; then
         ffmpeg -y -hide_banner \
                -f lavfi -i "testsrc=duration=${INTERVAL}:size=1280x720:rate=30000/1001,format=yuv420p" \
                -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000:duration=0.5" \
@@ -55,7 +56,7 @@ generate_test_file() {
                -fflags +genpts \
                -avoid_negative_ts make_zero \
                -muxdelay 0 -muxpreload 0 \
-               "temp/${filename}"
+               "${WORKDIR}/${filename}"
     fi
 }
 
@@ -63,7 +64,7 @@ generate_test_file "_stest_1.ts" &
 generate_test_file "_stest_2.ts" &
 wait
 
-cat > temp/filelist.txt << EOF
+cat > ${WORKDIR}/filelist.txt << EOF
 file '_stest_1.ts'
 file '_stest_2.ts'
 
@@ -79,7 +80,7 @@ DEFAULT_START_TIME="2024-12-31 15:00:00"
 ffmpeg -y -hide_banner \
        -fflags +genpts+igndts \
        -avoid_negative_ts make_zero \
-       -f concat -safe 0 -i temp/filelist.txt \
+       -f concat -safe 0 -i "${WORKDIR}/filelist.txt" \
        -c:v copy -c:a copy \
        -mpegts_service_id "${DEFAULT_SERVICE_ID}" \
        -mpegts_transport_stream_id "${DEFAULT_TRANSPORT_STREAM_ID}" \
@@ -87,8 +88,8 @@ ffmpeg -y -hide_banner \
        -mpegts_pmt_start_pid 257 \
        -metadata service_provider="${DEFAULT_SERVICE_PROVIDER}" \
        -metadata service_name="${DEFAULT_SERVICE_NAME}" \
-       temp/combined.ts
-#tsanalyze temp/combined.ts && exit 1
+       "${WORKDIR}/combined.ts"
+#tsanalyze "${WORKDIR}/combined.ts" && exit 1
 
 exit 0
 
@@ -117,8 +118,7 @@ exit 0
 # シンプルなamatsukaze互換TSファイル生成
 echo "Simple amatsukaze compatible TS generation..."
 
-# 最小限のPMT修正のみ実施
-cat > temp/pmt.xml << EOF
+cat > "${WORKDIR}/pmt.xml" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <tsduck>
   <PMT version="1" service_id="${DEFAULT_SERVICE_ID}" PCR_PID="273">
@@ -134,9 +134,9 @@ EOF
 
 # XML→binコンパイル
 #echo "Compiling PSI/SI tables..."
-#tstabcomp --japan temp/sdt.xml -o temp/sdt.bin
-#tstabcomp --japan temp/tot.xml -o temp/tot.bin
-#tstabcomp --japan temp/pmt.xml -o temp/pmt.bin
+#tstabcomp --japan "${WORKDIR}/sdt.xml" -o "${WORKDIR}/sdt.bin"
+#tstabcomp --japan "${WORKDIR}/tot.xml" -o "${WORKDIR}/tot.bin"
+#tstabcomp --japan "${WORKDIR}/pmt.xml" -o "${WORKDIR}/pmt.bin"
 
 # jtv_gen.sh方式のシンプルなPSI/SI注入
 #   PAT (Program Association Table)  0x0000(  0)  15.0   100 required
@@ -161,7 +161,7 @@ EOF
 #   SDT 0x0011( 17)
 #   PMT 0x0101(257)
 #echo "Injecting basic PSI/SI metadata..."
-#tsp --japan -I file temp/combined.ts \
+#tsp --japan -I "file ${WORKDIR}/combined.ts" \
 #    -O file final_v1.ts
 #tsanalyze final_v1.ts
 
