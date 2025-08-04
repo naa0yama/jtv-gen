@@ -10,7 +10,13 @@ set -euo pipefail
 # ==============================================================================
 # Default configuration
 DEBUG=false
-CONFIG_FILE="scene_01min.conf"
+CONFIG_FILE="scene_06min.conf"
+CONFIG_BASENAME=$(basename "$CONFIG_FILE" .conf)
+OUTPUT_DIR="output/${CONFIG_BASENAME}"
+TEMP_DIR="temp/${CONFIG_BASENAME}"
+LOG_FILE="tv_generation.log"
+# Output filename for MPEG-2 TS format
+FINAL_OUTPUT=""
 
 # Default broadcast metadata (can be overridden in config file)
 DEFAULT_SERVICE_ID=65024  # 0xFE00 - For technical testing
@@ -27,13 +33,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
-
-# Global variables (will be set later)
-CONFIG_BASENAME=""
-OUTPUT_DIR=""
-TEMP_DIR=""
-LOG_FILE=""
-FINAL_OUTPUT=""
 
 # Global arrays (loaded from config)
 declare -A CONFIG
@@ -175,7 +174,6 @@ show_tsduck_install_instructions() {
 	log "- Use package manager if available for your distribution"
 	log "- Build from source: https://github.com/tsduck/tsduck"
 	log ""
-	log "${YELLOW}Note: You can use --skip-eit to bypass TSDuck requirement${NC}"
 }
 
 # Show fallback TSDuck installation instructions
@@ -219,9 +217,8 @@ USAGE:
 
 OPTIONS:
 	--debug              Enable verbose debug output
-	-c, --config FILE    Configuration file (default: scene_1.conf)
+	-c, --config FILE    Configuration file (default: ${CONFIG_FILE})
 	-y, --yes            Skip confirmation prompt and start generation immediately
-	--skip-eit           Skip EIT/SDT/TOT metadata injection (default: inject metadata with TSDuck)
 	-h, --help           Show this comprehensive help message
 
 EXAMPLES:
@@ -245,7 +242,7 @@ CONFIGURATION:
 
 OUTPUT:
 	The generated MPEG-TS file will be named based on the configuration:
-	- scene_01min.conf → output/jtv_scene_01min.ts
+	- scene_01min.conf → ${OUTPUT_DIR}/jtv_scene_01min.ts
 
 TECHNICAL SPECIFICATIONS:
 	- Video: MPEG-2, 1440x1080, 16:9 aspect, 29.97fps interlaced
@@ -266,7 +263,7 @@ REQUIREMENTS:
 	- ffmpeg (with MPEG-2 and AAC encoding support)
 	- bc (for duration calculations)
 	- Standard Unix tools (grep, awk, etc.)
-	- TSDuck (for EIT metadata injection, use --skip-eit to disable): https://tsduck.io/download/tsduck/
+	- TSDuck (for EIT metadata injection): https://tsduck.io/download/tsduck/
 
 INTERRUPT HANDLING:
 	The script handles interruptions (Ctrl+C, SIGTERM) gracefully:
@@ -275,11 +272,11 @@ INTERRUPT HANDLING:
 	- Provides clear status messages
 
 FILES CREATED:
-	- output/jtv_[config].ts      Final MPEG-TS output
-	- output/generation_report.txt       Detailed generation report
-	- output/segment_structure.csv       Segment timing data
-	- tv_generation.log                  Generation log file
-	- temp/                              Temporary files (auto-cleaned)
+	- ${OUTPUT_DIR}/jtv_[config].ts         Final MPEG-TS output
+	- ${OUTPUT_DIR}/generation_report.txt   Detailed generation report
+	- ${OUTPUT_DIR}/segment_structure.csv   Segment timing data
+	- tv_generation.log                     Generation log file
+	- temp/                                 Temporary files (auto-cleaned)
 
 For more information about configuration format and technical details,
 see the configuration files and generated reports.
@@ -314,27 +311,12 @@ while [[ $# -gt 0 ]]; do
 			;;
 		*)
 			echo "Unknown option: $1"
-			echo "Usage: $0 [--debug] [-c|--config CONFIG_FILE] [-y|--yes] [--skip-eit] [-h|--help] (default: scene_1.conf)"
+			echo "Usage: $0 [--debug] [-c|--config CONFIG_FILE] [-y|--yes] [-h|--help] (default: ${CONFIG_FILE})"
 			echo "Use $0 --help for detailed information."
 			exit 1
 			;;
 	esac
 done
-
-# ============================================================================
-# INITIALIZATION
-# ============================================================================
-
-# Set up paths and directories
-CONFIG_BASENAME=$(basename "$CONFIG_FILE" .conf)
-OUTPUT_DIR="output/${CONFIG_BASENAME}"
-TEMP_DIR="temp"
-LOG_FILE="tv_generation.log"
-# Output filename for MPEG-2 TS format
-FINAL_OUTPUT=""
-
-# Initialize log file
-: > "$LOG_FILE"
 
 # ============================================================================
 # CORE FUNCTIONS
@@ -344,8 +326,28 @@ load_config() {
 	log "${BLUE}Loading configuration from $CONFIG_FILE${NC}"
 
 	if [[ ! -f "$CONFIG_FILE" ]]; then
-		log "${RED}Error: Configuration file $CONFIG_FILE not found${NC}"
-		exit 1
+		if [[ "$CONFIG_FILE" = "scene_06min.conf" ]]; then
+			cat > "scene_06min.conf" << EOF
+# TV Program Configuration
+# Format: SECTION_TYPE,SECTION_NAME,START_FRAME,END_FRAME
+# SECTION_TYPE: RecMargin, Main, CM
+# START_FRAME,END_FRAME: Frame range (29.97fps)
+
+# Program Structure
+SECTION_TYPE,SECTION_NAME,START_FRAME,END_FRAME
+Main,Main_1,0,1198
+CM,CM1-1,1199,2097
+Main,Main_2,2098,7191
+CM,CM2-1,7192,7641
+CM,CM2-2,7642,8540
+CM,CM2-3,8541,8990
+CM,CM2-4,8991,9439
+CM,CM2-5,9440,9888
+CM,CM2-6,9889,10338
+CM,CM2-7,10339,10793
+EOF
+		fi
+		log "${YELLOW}Warning: Configuration file $CONFIG_FILE defualt created${NC}"
 	fi
 
 	# Default variables
@@ -477,7 +479,7 @@ show_media_specs() {
 	duration_formatted=$(printf "%02d:%02d:%02d" $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}/3600)) $(((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%3600)/60)) $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%60)))
 
 	log "${GREEN}Video:${NC}         MPEG-2, progressive, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR 16:9]"
-	log "              ${CONFIG[FRAME_RATE]} fps, bitrate min ${CONFIG[VIDEO_BITRATE_MIN]}, avg ${CONFIG[VIDEO_BITRATE_AVG]}, maxrate ${CONFIG[VIDEO_BITRATE_MAX]}"
+	log "               ${CONFIG[FRAME_RATE]} fps, bitrate min ${CONFIG[VIDEO_BITRATE_MIN]}, avg ${CONFIG[VIDEO_BITRATE_AVG]}, maxrate ${CONFIG[VIDEO_BITRATE_MAX]}"
 	log "${GREEN}Audio:${NC}         ${CONFIG[AUDIO_CODEC]}, ${CONFIG[AUDIO_SAMPLE_RATE]}Hz, ${CONFIG[AUDIO_CHANNELS]}ch, ${CONFIG[AUDIO_BITRATE]}"
 	log "${GREEN}Duration:${NC}      $duration_formatted (${CONFIG[BROADCAST_DURATION_FRAMES]} frames)"
 	log "${GREEN}Broadcast:${NC}     Service ID ${CONFIG[BROADCAST_SERVICE_ID]}, Transport Stream ID ${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
@@ -927,16 +929,31 @@ concatenate_segments() {
 	: > "$concat_file"
 
 	# Sort segment files by their numeric index to maintain config order
+	local files_found=0
 	for i in $(seq -f "%03g" 0 999); do
-		local file_pattern="$TEMP_DIR/segment_${i}_*.ts"
-		if compgen -G "$file_pattern" > /dev/null; then
-			for matched_file in $file_pattern; do
+		# Use array to properly handle glob expansion
+		local segment_files=("$TEMP_DIR/segment_${i}_"*.ts)
+
+		# Check if any files match the pattern (avoid unmatched glob expansion)
+		if [[ -f "${segment_files[0]}" ]]; then
+			for matched_file in "${segment_files[@]}"; do
 				if [[ -f "$matched_file" ]]; then
-					echo "file '../$matched_file'" >> "$concat_file"
+					echo "file '$(realpath "$matched_file")'" >> "$concat_file"
+					files_found=$((files_found + 1))
+					[[ "$DEBUG" == true ]] && log "${YELLOW}Added to concat: $(basename "$matched_file")${NC}"
 				fi
 			done
 		fi
 	done
+
+	log "${BLUE}Found $files_found segment files to concatenate${NC}"
+
+	# Verify concat file has content
+	if [[ ! -s "$concat_file" ]]; then
+		log "${RED}Error: No segment files found for concatenation${NC}"
+		log "${RED}Expected files: $TEMP_DIR/segment_*_*.ts${NC}"
+		return 1
+	fi
 
 	# Concatenate using stream copy (no re-encoding)
 	ffmpeg -y -hide_banner \
@@ -953,7 +970,13 @@ concatenate_segments() {
 		-f mpegts \
 		"$TEMP_DIR/$FINAL_OUTPUT" 2>> "$LOG_FILE"
 
-	log "${GREEN}Intermediate output created: $TEMP_DIR/$FINAL_OUTPUT${NC}"
+	local ffmpeg_result=$?
+	if [[ $ffmpeg_result -eq 0 ]]; then
+		log "${GREEN}Intermediate output created: $TEMP_DIR/$FINAL_OUTPUT${NC}"
+	else
+		log "${RED}Error: Failed to concatenate segments (exit code: $ffmpeg_result)${NC}"
+		return 1
+	fi
 }
 
 # Generate optimized broadcast metadata files
@@ -1126,7 +1149,7 @@ inject_eit_metadata() {
 
 	# Check which tables are available (comprehensive PSI/SI)
 	local available_tables=()
-	for table in pat cat pmt nit sdt eit tot; do
+	for table in pat pmt nit sdt eit tot; do
 		if [[ -f "$tables_dir/${table}.bin" ]]; then
 			available_tables+=("$table")
 			log "${GREEN}✓ ${table}.bin ready for injection${NC}"
@@ -1548,6 +1571,7 @@ main() {
 	# Pre-generate directories
 	log "${BLUE}Preparing temporary directories${NC}"
 	mkdir -p "$TEMP_DIR"
+	touch "$TEMP_DIR/_${CONFIG_BASENAME}_$(date '+%Y%m%dT%H%M%S')"
 	# Logo generation no longer needed - using direct drawtext rendering
 
 	generate_metadata_files
