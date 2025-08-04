@@ -5,95 +5,12 @@
 
 set -euo pipefail
 
-# ============================================================================
-# TRAP HANDLERS FOR CLEANUP
-# ============================================================================
-
-# Cleanup function for trap handlers
-cleanup_on_exit() {
-    local exit_code=$?
-
-    # Check if we're being called from a trap
-    local from_trap=false
-    if [[ "${BASH_SUBSHELL}" == "0" ]] && [[ -n "${BASH_LINENO[1]}" ]]; then
-        from_trap=true
-    fi
-
-    if [[ $exit_code -ne 0 ]]; then
-        log "${RED}Script interrupted or failed (exit code: $exit_code)${NC}"
-    fi
-
-    # Reset terminal state - always do this to ensure proper cleanup
-    stty sane 2>/dev/null || true
-    tput sgr0 2>/dev/null || true  # Reset terminal attributes
-    printf "\n"  # Ensure prompt appears on new line
-
-    # Clean up temporary files if they exist
-    if [[ -d "$TEMP_DIR" ]]; then
-        if [[ "$DEBUG" == true ]]; then
-            log "${YELLOW}Keeping temporary files in $TEMP_DIR (debug mode)${NC}"
-        else
-            log "${YELLOW}Cleaning up temporary files in $TEMP_DIR${NC}"
-            rm -rf "$TEMP_DIR"
-        fi
-    fi
-
-    # Kill any background ffmpeg processes
-    if pgrep -f "ffmpeg.*$TEMP_DIR" > /dev/null 2>&1; then
-        log "${YELLOW}Terminating background ffmpeg processes${NC}"
-        pkill -f "ffmpeg.*$TEMP_DIR" 2>/dev/null || true
-    fi
-
-    # Kill any background segment generation processes
-    if pgrep -f "process_segment_async" > /dev/null 2>&1; then
-        log "${YELLOW}Terminating background segment generation processes${NC}"
-        pkill -f "process_segment_async" 2>/dev/null || true
-    fi
-
-    if [[ $exit_code -ne 0 ]]; then
-        if [[ "$DEBUG" == true ]]; then
-            log "${RED}Generation failed. Temporary files kept in $TEMP_DIR for debugging.${NC}"
-        else
-            log "${RED}Generation failed. All temporary files have been cleaned up.${NC}"
-        fi
-    fi
-
-    # Reset terminal one more time before final exit
-    if [[ "$from_trap" == false ]]; then
-        # Final terminal reset to ensure prompt visibility
-        stty sane 2>/dev/null || true
-        tput sgr0 2>/dev/null || true
-        printf "\n"  # Extra newline for prompt
-        exit $exit_code
-    fi
-}
-
-# Signal handler for interruption (INT/TERM)
-handle_interrupt() {
-    local signal=$1
-    log "${YELLOW}Received signal $signal - initiating cleanup...${NC}"
-
-    # Reset terminal state immediately and thoroughly
-    stty sane 2>/dev/null || true
-    tput sgr0 2>/dev/null || true  # Reset terminal attributes
-    printf "\n"  # Ensure clean line for prompt
-
-    # Set exit code for cleanup function
-    exit 130  # Standard exit code for Ctrl+C
-}
-
-# Set up trap handlers
-trap cleanup_on_exit EXIT
-trap 'handle_interrupt INT' INT
-trap 'handle_interrupt TERM' TERM
-
-# ============================================================================
+# ==============================================================================
 # GLOBAL CONFIGURATION AND VARIABLES
-# ============================================================================
-
+# ==============================================================================
 # Default configuration
 DEBUG=false
-CONFIG_FILE="scene_1.conf"
+CONFIG_FILE="scene_01min.conf"
 
 # Default broadcast metadata (can be overridden in config file)
 DEFAULT_SERVICE_ID=65024  # 0xFE00 - For technical testing
@@ -123,169 +40,246 @@ declare -A CONFIG
 declare -a SEGMENTS
 
 # ============================================================================
+# TRAP HANDLERS FOR CLEANUP
+# ============================================================================
+
+# Cleanup function for trap handlers
+cleanup_on_exit() {
+	local exit_code=$?
+
+	# Check if we're being called from a trap
+	local from_trap=false
+	if [[ "${BASH_SUBSHELL}" == "0" ]] && [[ -n "${BASH_LINENO[1]}" ]]; then
+		from_trap=true
+	fi
+
+	if [[ $exit_code -ne 0 ]]; then
+		log "${RED}Script interrupted or failed (exit code: $exit_code)${NC}"
+	fi
+
+	# Reset terminal state - always do this to ensure proper cleanup
+	stty sane 2>/dev/null || true
+	tput sgr0 2>/dev/null || true  # Reset terminal attributes
+	printf "\n"  # Ensure prompt appears on new line
+
+	# Clean up temporary files if they exist
+	if [[ -d "$TEMP_DIR" ]]; then
+		if [[ "$DEBUG" == true ]]; then
+			log "${YELLOW}Keeping temporary files in $TEMP_DIR (debug mode)${NC}"
+		else
+			log "${YELLOW}Cleaning up temporary files in $TEMP_DIR${NC}"
+			rm -rf "$TEMP_DIR"
+		fi
+	fi
+
+	# Kill any background ffmpeg processes
+	if pgrep -f "ffmpeg.*$TEMP_DIR" > /dev/null 2>&1; then
+		log "${YELLOW}Terminating background ffmpeg processes${NC}"
+		pkill -f "ffmpeg.*$TEMP_DIR" 2>/dev/null || true
+	fi
+
+	# Kill any background segment generation processes
+	if pgrep -f "process_segment_async" > /dev/null 2>&1; then
+		log "${YELLOW}Terminating background segment generation processes${NC}"
+		pkill -f "process_segment_async" 2>/dev/null || true
+	fi
+
+	if [[ $exit_code -ne 0 ]]; then
+		if [[ "$DEBUG" == true ]]; then
+			log "${RED}Generation failed. Temporary files kept in $TEMP_DIR for debugging.${NC}"
+		else
+			log "${RED}Generation failed. All temporary files have been cleaned up.${NC}"
+		fi
+	fi
+
+	# Reset terminal one more time before final exit
+	if [[ "$from_trap" == false ]]; then
+		# Final terminal reset to ensure prompt visibility
+		stty sane 2>/dev/null || true
+		tput sgr0 2>/dev/null || true
+		printf "\n"  # Extra newline for prompt
+		exit $exit_code
+	fi
+}
+
+# Signal handler for interruption (INT/TERM)
+handle_interrupt() {
+	local signal=$1
+	log "${YELLOW}Received signal $signal - initiating cleanup...${NC}"
+
+	# Reset terminal state immediately and thoroughly
+	stty sane 2>/dev/null || true
+	tput sgr0 2>/dev/null || true  # Reset terminal attributes
+	printf "\n"  # Ensure clean line for prompt
+
+	# Set exit code for cleanup function
+	exit 130  # Standard exit code for Ctrl+C
+}
+
+# Set up trap handlers
+trap cleanup_on_exit EXIT
+trap 'handle_interrupt INT' INT
+trap 'handle_interrupt TERM' TERM
+
+# ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
 
 # Logging function
 log() {
-    echo -e "${1}" | tee -a "$LOG_FILE" 2>/dev/null || echo -e "${1}"
+	echo -e "${1}" | tee -a "$LOG_FILE" 2>/dev/null || echo -e "${1}"
 }
 
 # Show TSDuck installation instructions with latest release info
 show_tsduck_install_instructions() {
-    log "${YELLOW}TSDuck Installation Instructions:${NC}"
-    log ""
+	log "${YELLOW}TSDuck Installation Instructions:${NC}"
+	log ""
 
-    # Try to get latest release info from GitHub API with proper User-Agent
-    local latest_info
-    local user_agent="JTV-Gen/1.0 (https://github.com/naa0yama/jtv-gen)"
+	# Try to get latest release info from GitHub API with proper User-Agent
+	local latest_info
+	local user_agent="JTV-Gen/1.0 (https://github.com/naa0yama/jtv-gen)"
 
-    if command -v curl >/dev/null 2>&1; then
-        latest_info=$(curl -s -H "User-Agent: $user_agent" "https://api.github.com/repos/tsduck/tsduck/releases/latest" 2>/dev/null)
-    elif command -v wget >/dev/null 2>&1; then
-        latest_info=$(wget --user-agent="$user_agent" -qO- "https://api.github.com/repos/tsduck/tsduck/releases/latest" 2>/dev/null)
-    fi
+	if command -v curl >/dev/null 2>&1; then
+		latest_info=$(curl -s -H "User-Agent: $user_agent" "https://api.github.com/repos/tsduck/tsduck/releases/latest" 2>/dev/null)
+	elif command -v wget >/dev/null 2>&1; then
+		latest_info=$(wget --user-agent="$user_agent" -qO- "https://api.github.com/repos/tsduck/tsduck/releases/latest" 2>/dev/null)
+	fi
 
-    if [[ -n "$latest_info" ]] && command -v grep >/dev/null 2>&1; then
-        # Extract version and Ubuntu 24.04 deb file URL
-        local version tag_name ubuntu24_url
-        version=$(echo "$latest_info" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-        tag_name="$version"
-        ubuntu24_url=$(echo "$latest_info" | grep '"browser_download_url"' | grep 'ubuntu24.*\.deb' | head -1 | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
+	if [[ -n "$latest_info" ]] && command -v grep >/dev/null 2>&1; then
+		# Extract version and Ubuntu 24.04 deb file URL
+		local version tag_name ubuntu24_url
+		version=$(echo "$latest_info" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+		tag_name="$version"
+		ubuntu24_url=$(echo "$latest_info" | grep '"browser_download_url"' | grep 'ubuntu24.*\.deb' | head -1 | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
 
-        if [[ -n "$version" ]] && [[ -n "$ubuntu24_url" ]]; then
-            log "${GREEN}Latest Release: $version${NC}"
-            log ""
-            log "${BLUE}= Ubuntu 24.04 LTS:${NC}"
-            log "wget \"$ubuntu24_url\""
-            log "sudo apt --fix-broken install \"./$(basename "$ubuntu24_url")\""
-            log ""
-            log "${BLUE}= Other Ubuntu/Debian versions:${NC}"
-            log "Check available packages at: https://github.com/tsduck/tsduck/releases/tag/$tag_name"
-        else
-            # API response malformed, use fallback
-            show_tsduck_fallback_instructions
-        fi
-    else
-        # API not available, use fallback
-        show_tsduck_fallback_instructions
-    fi
+		if [[ -n "$version" ]] && [[ -n "$ubuntu24_url" ]]; then
+			log "${GREEN}Latest Release: $version${NC}"
+			log ""
+			log "${BLUE}= Ubuntu 24.04 LTS:${NC}"
+			log "wget \"$ubuntu24_url\""
+			log "sudo apt --fix-broken install \"./$(basename "$ubuntu24_url")\""
+			log ""
+			log "${BLUE}= Other Ubuntu/Debian versions:${NC}"
+			log "Check available packages at: https://github.com/tsduck/tsduck/releases/tag/$tag_name"
+		else
+			# API response malformed, use fallback
+			show_tsduck_fallback_instructions
+		fi
+	else
+		# API not available, use fallback
+		show_tsduck_fallback_instructions
+	fi
 
-    log ""
-    log "${BLUE}= Alternative installation methods:${NC}"
-    log "- Use package manager if available for your distribution"
-    log "- Build from source: https://github.com/tsduck/tsduck"
-    log ""
-    log "${YELLOW}Note: You can use --skip-eit to bypass TSDuck requirement${NC}"
+	log ""
+	log "${BLUE}= Alternative installation methods:${NC}"
+	log "- Use package manager if available for your distribution"
+	log "- Build from source: https://github.com/tsduck/tsduck"
+	log ""
+	log "${YELLOW}Note: You can use --skip-eit to bypass TSDuck requirement${NC}"
 }
 
 # Show fallback TSDuck installation instructions
 show_tsduck_fallback_instructions() {
-    log "${BLUE}= Installation Instructions:${NC}"
-    log "1. Visit the official download page:"
-    log "   ${YELLOW}https://tsduck.io/download/tsduck/${NC}"
-    log ""
-    log "2. Download the appropriate package for your system:"
-    log "   - Ubuntu/Debian: .deb packages"
-    log "   - Red Hat/CentOS/Fedora: .rpm packages"
-    log "   - Windows: .exe installer"
-    log "   - macOS: .pkg installer"
-    log ""
-    log "3. Install the downloaded package:"
-    log "   ${BLUE}For Ubuntu/Debian:${NC}"
-    log "   sudo apt install ./tsduck_*.deb"
-    log ""
-    log "   ${BLUE}For Red Hat/CentOS/Fedora:${NC}"
-    log "   sudo rpm -i tsduck-*.rpm"
-    log ""
-    log "4. Verify installation:"
-    log "   tsp --version"
+	log "${BLUE}= Installation Instructions:${NC}"
+	log "1. Visit the official download page:"
+	log "   ${YELLOW}https://tsduck.io/download/tsduck/${NC}"
+	log ""
+	log "2. Download the appropriate package for your system:"
+	log "   - Ubuntu/Debian: .deb packages"
+	log "   - Red Hat/CentOS/Fedora: .rpm packages"
+	log "   - Windows: .exe installer"
+	log "   - macOS: .pkg installer"
+	log ""
+	log "3. Install the downloaded package:"
+	log "   ${BLUE}For Ubuntu/Debian:${NC}"
+	log "   sudo apt install ./tsduck_*.deb"
+	log ""
+	log "   ${BLUE}For Red Hat/CentOS/Fedora:${NC}"
+	log "   sudo rpm -i tsduck-*.rpm"
+	log ""
+	log "4. Verify installation:"
+	log "   tsp --version"
 }
 
 # Show comprehensive help
 show_help() {
-    cat << 'EOF'
+	cat << EOF
 ================================================================================
 Japanese TV Content Generator (JTV Gen) - Japanese TV Broadcast Dummy File Creator
 ================================================================================
 
 DESCRIPTION:
-    Generates Japanese TV broadcast dummy files in MPEG-TS
-    format, including main program segments, commercial segments with Japanese
-    broadcasting standards (15-second intervals), transparent logos, and proper
-    audio levels following ARIB specifications.
+	Generates Japanese TV broadcast dummy files in MPEG-TS
+	format, including main program segments, commercial segments with Japanese
+	broadcasting standards (15-second intervals), transparent logos, and proper
+	audio levels following ARIB specifications.
 
 USAGE:
-    ./jtv_gen.sh [OPTIONS]
+	./jtv_gen.sh [OPTIONS]
 
 OPTIONS:
-    --debug              Enable verbose debug output
-    -c, --config FILE    Configuration file (default: scene_1.conf)
-    -y, --yes           Skip confirmation prompt and start generation immediately
-    --skip-eit          Skip EIT/SDT/TOT metadata injection (default: inject metadata with TSDuck)
-    -h, --help          Show this comprehensive help message
+	--debug              Enable verbose debug output
+	-c, --config FILE    Configuration file (default: scene_1.conf)
+	-y, --yes            Skip confirmation prompt and start generation immediately
+	--skip-eit           Skip EIT/SDT/TOT metadata injection (default: inject metadata with TSDuck)
+	-h, --help           Show this comprehensive help message
 
 EXAMPLES:
-    # Generate using default configuration
-    ./jtv_gen.sh
+	# Generate using default configuration
+	./jtv_gen.sh
 
-    # Generate with debug output enabled
-    ./jtv_gen.sh --debug
+	# Generate with debug output enabled
+	./jtv_gen.sh --debug
 
-    # Use custom configuration file
-    ./jtv_gen.sh -c my_program.conf
+	# Use custom configuration file
+	./jtv_gen.sh -c ${CONFIG_FILE}
 
-    # Debug mode with custom config
-    ./jtv_gen.sh --debug -c my_program.conf
+	# Debug mode with custom config
+	./jtv_gen.sh --debug -c ${CONFIG_FILE}
 
 CONFIGURATION:
-    The script uses configuration files to define:
-    - Program structure (main segments, CM segments, timing)
-    - Technical specifications (resolution, bitrate, audio levels)
-    - Japanese broadcasting standards compliance
-
-    Example configuration files:
-    - scene_1.conf          Full 30-minute program (25 segments)
-    - tv_config_test.conf   Short test program (5 segments)
+	The script uses configuration files to define:
+	- Program structure (main segments, CM segments, timing)
+	- Technical specifications (resolution, bitrate, audio levels)
+	- Japanese broadcasting standards compliance
 
 OUTPUT:
-    The generated MPEG-TS file will be named based on the configuration:
-    - scene_1.conf → output/jtv_scene_1.ts
-    - my_program.conf → output/jtv_my_program.ts
+	The generated MPEG-TS file will be named based on the configuration:
+	- scene_01min.conf → output/jtv_scene_01min.ts
 
 TECHNICAL SPECIFICATIONS:
-    - Video: MPEG-2, 1440x1080, 16:9 aspect, 29.97fps interlaced
-    - Audio: AAC-LC, 48kHz, stereo, Japanese broadcast levels
-    - Container: MPEG-TS with proper stream IDs
-    - Standards: ARIB compliant for Japanese terrestrial broadcasting
+	- Video: MPEG-2, 1440x1080, 16:9 aspect, 29.97fps interlaced
+	- Audio: AAC-LC, 48kHz, stereo, Japanese broadcast levels
+	- Container: MPEG-TS with proper stream IDs
+	- Standards: ARIB compliant for Japanese terrestrial broadcasting
 
 FEATURES:
-    ✓ Main program segments with transparent logos
-    ✓ Commercial segments following 15-second Japanese standards
-    ✓ Silent periods with color inversion around commercials
-    ✓ Japanese audio level standards (-20dBFS for 0VU reference)
-    ✓ Configurable program structure via CSV-like format
-    ✓ Professional broadcast-quality output
-    ✓ Automatic cleanup on interruption or failure
+	✓ Main program segments with transparent logos
+	✓ Commercial segments following 15-second Japanese standards
+	✓ Silent periods with color inversion around commercials
+	✓ Japanese audio level standards (-20dBFS for 0VU reference)
+	✓ Configurable program structure via CSV-like format
+	✓ Professional broadcast-quality output
+	✓ Automatic cleanup on interruption or failure
 
 REQUIREMENTS:
-    - ffmpeg (with MPEG-2 and AAC encoding support)
-    - bc (for duration calculations)
-    - Standard Unix tools (grep, awk, etc.)
-    - TSDuck (for EIT metadata injection, use --skip-eit to disable): https://tsduck.io/download/tsduck/
+	- ffmpeg (with MPEG-2 and AAC encoding support)
+	- bc (for duration calculations)
+	- Standard Unix tools (grep, awk, etc.)
+	- TSDuck (for EIT metadata injection, use --skip-eit to disable): https://tsduck.io/download/tsduck/
 
 INTERRUPT HANDLING:
-    The script handles interruptions (Ctrl+C, SIGTERM) gracefully:
-    - Terminates any running ffmpeg processes
-    - Cleans up temporary files automatically
-    - Provides clear status messages
+	The script handles interruptions (Ctrl+C, SIGTERM) gracefully:
+	- Terminates any running ffmpeg processes
+	- Cleans up temporary files automatically
+	- Provides clear status messages
 
 FILES CREATED:
-    - output/jtv_[config].ts      Final MPEG-TS output
-    - output/generation_report.txt       Detailed generation report
-    - output/segment_structure.csv       Segment timing data
-    - tv_generation.log                  Generation log file
-    - temp_segments/                     Temporary files (auto-cleaned)
+	- output/jtv_[config].ts      Final MPEG-TS output
+	- output/generation_report.txt       Detailed generation report
+	- output/segment_structure.csv       Segment timing data
+	- tv_generation.log                  Generation log file
+	- temp/                              Temporary files (auto-cleaned)
 
 For more information about configuration format and technical details,
 see the configuration files and generated reports.
@@ -300,36 +294,31 @@ EOF
 
 # Parse command line arguments
 SKIP_CONFIRMATION=false
-INJECT_EIT=true
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        --debug)
-            DEBUG=true
-            shift
-            ;;
-        -c|--config)
-            CONFIG_FILE="$2"
-            shift 2
-            ;;
-        -y|--yes)
-            SKIP_CONFIRMATION=true
-            shift
-            ;;
-        --skip-eit)
-            INJECT_EIT=false
-            shift
-            ;;
-        -h|--help)
-            show_help
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1"
-            echo "Usage: $0 [--debug] [-c|--config CONFIG_FILE] [-y|--yes] [--skip-eit] [-h|--help] (default: scene_1.conf)"
-            echo "Use $0 --help for detailed information."
-            exit 1
-            ;;
-    esac
+	case $1 in
+		--debug)
+			DEBUG=true
+			shift
+			;;
+		-c|--config)
+			CONFIG_FILE="$2"
+			shift 2
+			;;
+		-y|--yes)
+			SKIP_CONFIRMATION=true
+			shift
+			;;
+		-h|--help)
+			show_help
+			exit 0
+			;;
+		*)
+			echo "Unknown option: $1"
+			echo "Usage: $0 [--debug] [-c|--config CONFIG_FILE] [-y|--yes] [--skip-eit] [-h|--help] (default: scene_1.conf)"
+			echo "Use $0 --help for detailed information."
+			exit 1
+			;;
+	esac
 done
 
 # ============================================================================
@@ -352,1339 +341,1240 @@ FINAL_OUTPUT=""
 # ============================================================================
 # Load configuration
 load_config() {
-    log "${BLUE}Loading configuration from $CONFIG_FILE${NC}"
+	log "${BLUE}Loading configuration from $CONFIG_FILE${NC}"
 
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        log "${RED}Error: Configuration file $CONFIG_FILE not found${NC}"
-        exit 1
-    fi
+	if [[ ! -f "$CONFIG_FILE" ]]; then
+		log "${RED}Error: Configuration file $CONFIG_FILE not found${NC}"
+		exit 1
+	fi
 
-    # Default variables
-    CONFIG["FRAME_RATE"]=30000/1001
-    CONFIG["VIDEO_WIDTH"]=1440
-    CONFIG["VIDEO_HEIGHT"]=1080
-    CONFIG["VIDEO_CODEC"]=mpeg2video
-    CONFIG["VIDEO_BITRATE_MIN"]=1M
-    CONFIG["VIDEO_BITRATE_AVG"]=6M
-    CONFIG["VIDEO_BITRATE_MAX"]=12M
+	# Default variables
+	CONFIG["FRAME_RATE"]=30000/1001
+	CONFIG["VIDEO_WIDTH"]=1440
+	CONFIG["VIDEO_HEIGHT"]=1080
+	CONFIG["VIDEO_CODEC"]=mpeg2video
+	CONFIG["VIDEO_BITRATE_MIN"]=1M
+	CONFIG["VIDEO_BITRATE_AVG"]=6M
+	CONFIG["VIDEO_BITRATE_MAX"]=12M
 
-    CONFIG["AUDIO_CODEC"]=aac
-    CONFIG["AUDIO_PROFILE"]=aac_low
-    CONFIG["AUDIO_BITRATE"]=248k
-    CONFIG["AUDIO_SAMPLE_RATE"]=48000
-    CONFIG["AUDIO_CHANNELS"]=2
+	CONFIG["AUDIO_CODEC"]=aac
+	CONFIG["AUDIO_PROFILE"]=aac_low
+	CONFIG["AUDIO_BITRATE"]=248k
+	CONFIG["AUDIO_SAMPLE_RATE"]=48000
+	CONFIG["AUDIO_CHANNELS"]=2
 
-    # Load technical settings - simplified approach
-    while IFS='=' read -r key value; do
-        # Skip comments and empty lines
-        [[ "$key" =~ ^# ]] && continue
-        [[ -z "$key" ]] && continue
+	# Load technical settings - simplified approach
+	while IFS='=' read -r key value; do
+		# Skip comments and empty lines
+		[[ "$key" =~ ^# ]] && continue
+		[[ -z "$key" ]] && continue
 
-        if [[ -n "$key" ]] && [[ -n "$value" ]]; then
-            CONFIG["$key"]="$value"
-            # echo "Loaded: $key=$value" >&2
-        fi
-    done < <(grep '^[A-Z_0-9]*=' "$CONFIG_FILE")
+		if [[ -n "$key" ]] && [[ -n "$value" ]]; then
+			CONFIG["$key"]="$value"
+			# echo "Loaded: $key=$value" >&2
+		fi
+	done < <(grep '^[A-Z_0-9]*=' "$CONFIG_FILE")
 
-    # Set broadcast metadata with defaults if not specified in config
-    CONFIG["BROADCAST_SERVICE_ID"]="${DEFAULT_SERVICE_ID}"
-    CONFIG["BROADCAST_TRANSPORT_STREAM_ID"]="${DEFAULT_TRANSPORT_STREAM_ID}"
-    CONFIG["BROADCAST_ORIGINAL_NETWORK_ID"]="${DEFAULT_ORIGINAL_NETWORK_ID}"
-    CONFIG["BROADCAST_SERVICE_NAME"]="${DEFAULT_SERVICE_NAME}"
-    CONFIG["BROADCAST_SERVICE_PROVIDER"]="${DEFAULT_SERVICE_PROVIDER}"
-    CONFIG["BROADCAST_NETWORK_NAME"]="${DEFAULT_NETWORK_NAME}"
-    CONFIG["BROADCAST_START_TIME"]="${DEFAULT_START_TIME}"
+	# Set broadcast metadata with defaults if not specified in config
+	CONFIG["BROADCAST_SERVICE_ID"]="${DEFAULT_SERVICE_ID}"
+	CONFIG["BROADCAST_TRANSPORT_STREAM_ID"]="${DEFAULT_TRANSPORT_STREAM_ID}"
+	CONFIG["BROADCAST_ORIGINAL_NETWORK_ID"]="${DEFAULT_ORIGINAL_NETWORK_ID}"
+	CONFIG["BROADCAST_SERVICE_NAME"]="${DEFAULT_SERVICE_NAME}"
+	CONFIG["BROADCAST_SERVICE_PROVIDER"]="${DEFAULT_SERVICE_PROVIDER}"
+	CONFIG["BROADCAST_NETWORK_NAME"]="${DEFAULT_NETWORK_NAME}"
+	CONFIG["BROADCAST_START_TIME"]="${DEFAULT_START_TIME}"
 
-    # Load segment structure - now with START_FRAME,END_FRAME format
-    local in_segments=false
-    local prev_end_frame=-1
-    local line_num=0
-    while IFS=',' read -r type name start_frame end_frame; do
-        line_num=$((line_num + 1))
-        # Skip comments and empty lines
-        [[ "$type" =~ ^# ]] && continue
-        [[ -z "$type" ]] && continue
+	# Load segment structure - now with START_FRAME,END_FRAME format
+	local in_segments=false
+	local prev_end_frame=-1
+	local line_num=0
+	while IFS=',' read -r type name start_frame end_frame; do
+		line_num=$((line_num + 1))
+		# Skip comments and empty lines
+		[[ "$type" =~ ^# ]] && continue
+		[[ -z "$type" ]] && continue
 
-        if [[ "$type" == "SECTION_TYPE" ]]; then
-            in_segments=true
-            continue
-        fi
+		if [[ "$type" == "SECTION_TYPE" ]]; then
+			in_segments=true
+			continue
+		fi
 
-        # Only process segment data, not config data
-        if [[ $in_segments == true ]] && [[ "$type" =~ ^(Main|CM)$ ]] && [[ -n "$start_frame" ]] && [[ -n "$end_frame" ]]; then
-            # Validate frame continuity - START must be previous END + 1
-            if [[ $prev_end_frame -ge 0 ]] && [[ $start_frame -ne $((prev_end_frame + 1)) ]]; then
-                log "${RED}Error: Frame continuity broken at line $line_num ($type,$name)${NC}"
-                log "${RED}Previous END_FRAME=$prev_end_frame, current START_FRAME=$start_frame${NC}"
-                log "${RED}Expected START_FRAME=$((prev_end_frame + 1)) (previous END + 1)${NC}"
-                exit 1
-            fi
+		# Only process segment data, not config data
+		if [[ $in_segments == true ]] && [[ "$type" =~ ^(Main|CM)$ ]] && [[ -n "$start_frame" ]] && [[ -n "$end_frame" ]]; then
+			# Validate frame continuity - START must be previous END + 1
+			if [[ $prev_end_frame -ge 0 ]] && [[ $start_frame -ne $((prev_end_frame + 1)) ]]; then
+				log "${RED}Error: Frame continuity broken at line $line_num ($type,$name)${NC}"
+				log "${RED}Previous END_FRAME=$prev_end_frame, current START_FRAME=$start_frame${NC}"
+				log "${RED}Expected START_FRAME=$((prev_end_frame + 1)) (previous END + 1)${NC}"
+				exit 1
+			fi
 
-            SEGMENTS+=("$type,$name,$start_frame,$end_frame")
-            prev_end_frame=$end_frame
-            # echo "DEBUG: Added segment: $type,$name,$start_frame,$end_frame" >&2
-        fi
-    done < "$CONFIG_FILE"
+			SEGMENTS+=("$type,$name,$start_frame,$end_frame")
+			prev_end_frame=$end_frame
+			# echo "DEBUG: Added segment: $type,$name,$start_frame,$end_frame" >&2
+		fi
+	done < "$CONFIG_FILE"
 
-    log "${GREEN}Loaded ${#SEGMENTS[@]} segments and ${#CONFIG[@]} configuration parameters${NC}"
+	log "${GREEN}Loaded ${#SEGMENTS[@]} segments and ${#CONFIG[@]} configuration parameters${NC}"
 
-    # Calculate total duration from segments for metadata generation
-    local max_end_frame=0
-    for segment_data in "${SEGMENTS[@]}"; do
-        IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
-        if [[ $end_frame -gt $max_end_frame ]]; then
-            max_end_frame=$end_frame
-        fi
-    done
-    CONFIG["BROADCAST_DURATION_FRAMES"]=$max_end_frame
-    local duration_seconds
-    duration_seconds=$(calculate_duration 0 "$max_end_frame")
-    CONFIG["BROADCAST_DURATION_SECONDS"]="$duration_seconds"
+	# Calculate total duration from segments for metadata generation
+	local max_end_frame=0
+	for segment_data in "${SEGMENTS[@]}"; do
+		IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+		if [[ $end_frame -gt $max_end_frame ]]; then
+			max_end_frame=$end_frame
+		fi
+	done
+	CONFIG["BROADCAST_DURATION_FRAMES"]=$max_end_frame
+	local duration_seconds
+	duration_seconds=$(calculate_duration 0 "$max_end_frame")
+	CONFIG["BROADCAST_DURATION_SECONDS"]="$duration_seconds"
 
-    # Set final output filename
-    FINAL_OUTPUT="jtv_${CONFIG_BASENAME}.ts"
+	# Set final output filename
+	FINAL_OUTPUT="jtv_${CONFIG_BASENAME}.ts"
 }
 
 # Calculate frame duration from frame numbers
 calculate_duration() {
-    local start_frame=$1
-    local end_frame=$2
-    local frame_rate=(${CONFIG["FRAME_RATE"]//// })
-    local fps_num=${frame_rate[0]}
-    local fps_den=${frame_rate[1]}
+	local start_frame=$1
+	local end_frame=$2
+	local frame_rate=(${CONFIG["FRAME_RATE"]//// })
+	local fps_num=${frame_rate[0]}
+	local fps_den=${frame_rate[1]}
 
-    local frame_count=$((end_frame - start_frame))
-    local duration
-    duration=$(echo "scale=6; $frame_count * $fps_den / $fps_num" | bc -l)
-    echo "$duration"
+	local frame_count=$((end_frame - start_frame))
+	local duration
+	duration=$(echo "scale=6; $frame_count * $fps_den / $fps_num" | bc -l)
+	echo "$duration"
 }
 
 # Format duration in seconds to HH:MM:SS.mmm format
 format_duration() {
-    local duration_seconds=$1
-    local hours minutes seconds milliseconds
+	local duration_seconds=$1
+	local hours minutes seconds milliseconds
 
-    # Convert to integer calculations to avoid printf issues
-    local total_ms_str
-    total_ms_str=$(echo "scale=0; $duration_seconds * 1000 / 1" | bc -l)
-    # Ensure it's an integer by removing any decimal point
-    local total_ms=${total_ms_str%.*}
+	# Convert to integer calculations to avoid printf issues
+	local total_ms_str
+	total_ms_str=$(echo "scale=0; $duration_seconds * 1000 / 1" | bc -l)
+	# Ensure it's an integer by removing any decimal point
+	local total_ms=${total_ms_str%.*}
 
-    hours=$((total_ms / 3600000))
-    local remaining_ms=$((total_ms - hours * 3600000))
+	hours=$((total_ms / 3600000))
+	local remaining_ms=$((total_ms - hours * 3600000))
 
-    minutes=$((remaining_ms / 60000))
-    remaining_ms=$((remaining_ms - minutes * 60000))
+	minutes=$((remaining_ms / 60000))
+	remaining_ms=$((remaining_ms - minutes * 60000))
 
-    seconds=$((remaining_ms / 1000))
-    milliseconds=$((remaining_ms % 1000))
+	seconds=$((remaining_ms / 1000))
+	milliseconds=$((remaining_ms % 1000))
 
-    printf "%02dh %02dm %02d.%03ds" "$hours" "$minutes" "$seconds" "$milliseconds"
+	printf "%02dh %02dm %02d.%03ds" "$hours" "$minutes" "$seconds" "$milliseconds"
 }
 
 # Show media specifications summary
 show_media_specs() {
-    local duration_formatted
-    duration_formatted=$(printf "%02d:%02d:%02d" $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}/3600)) $(((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%3600)/60)) $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%60)))
+	local duration_formatted
+	duration_formatted=$(printf "%02d:%02d:%02d" $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}/3600)) $(((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%3600)/60)) $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%60)))
 
-    log "${GREEN}Video:${NC}         MPEG-2, progressive, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR 16:9]"
-    log "              ${CONFIG[FRAME_RATE]} fps, bitrate min ${CONFIG[VIDEO_BITRATE_MIN]}, avg ${CONFIG[VIDEO_BITRATE_AVG]}, maxrate ${CONFIG[VIDEO_BITRATE_MAX]}"
-    log "${GREEN}Audio:${NC}         ${CONFIG[AUDIO_CODEC]}, ${CONFIG[AUDIO_SAMPLE_RATE]}Hz, ${CONFIG[AUDIO_CHANNELS]}ch, ${CONFIG[AUDIO_BITRATE]}"
-    log "${GREEN}Duration:${NC}      $duration_formatted (${CONFIG[BROADCAST_DURATION_FRAMES]} frames)"
-    log "${GREEN}Broadcast:${NC}     Service ID ${CONFIG[BROADCAST_SERVICE_ID]}, Transport Stream ID ${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
-    log "               Service: \"${CONFIG[BROADCAST_SERVICE_NAME]}\" by \"${CONFIG[BROADCAST_SERVICE_PROVIDER]}\""
-    log "               Network: \"${CONFIG[BROADCAST_NETWORK_NAME]}\""
+	log "${GREEN}Video:${NC}         MPEG-2, progressive, ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} [SAR 4:3, DAR 16:9]"
+	log "              ${CONFIG[FRAME_RATE]} fps, bitrate min ${CONFIG[VIDEO_BITRATE_MIN]}, avg ${CONFIG[VIDEO_BITRATE_AVG]}, maxrate ${CONFIG[VIDEO_BITRATE_MAX]}"
+	log "${GREEN}Audio:${NC}         ${CONFIG[AUDIO_CODEC]}, ${CONFIG[AUDIO_SAMPLE_RATE]}Hz, ${CONFIG[AUDIO_CHANNELS]}ch, ${CONFIG[AUDIO_BITRATE]}"
+	log "${GREEN}Duration:${NC}      $duration_formatted (${CONFIG[BROADCAST_DURATION_FRAMES]} frames)"
+	log "${GREEN}Broadcast:${NC}     Service ID ${CONFIG[BROADCAST_SERVICE_ID]}, Transport Stream ID ${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
+	log "               Service: \"${CONFIG[BROADCAST_SERVICE_NAME]}\" by \"${CONFIG[BROADCAST_SERVICE_PROVIDER]}\""
+	log "               Network: \"${CONFIG[BROADCAST_NETWORK_NAME]}\""
 
-    if [[ "$INJECT_EIT" == true ]]; then
-        log "${GREEN}EIT Metadata:${NC}  Start time ${CONFIG[BROADCAST_START_TIME]}, Present/Following enabled"
-    else
-        log "${YELLOW}EIT Metadata:${NC} Disabled (--skip-eit specified)"
-    fi
+	log "${GREEN}EIT Metadata:${NC}  Start time ${CONFIG[BROADCAST_START_TIME]} UTC, Present/Following enabled"
 }
 
 # Convert frame number to HH:MM:SS.FF format
 frame_to_timecode() {
-    local frame=$1
-    local frame_rate=(${CONFIG["FRAME_RATE"]//// })
-    local fps_num=${frame_rate[0]}
-    local fps_den=${frame_rate[1]}
-    local fps
-    fps=$(echo "scale=6; $fps_num / $fps_den" | bc -l)
+	local frame=$1
+	local frame_rate=(${CONFIG["FRAME_RATE"]//// })
+	local fps_num=${frame_rate[0]}
+	local fps_den=${frame_rate[1]}
+	local fps
+	fps=$(echo "scale=6; $fps_num / $fps_den" | bc -l)
 
-    # Calculate total seconds
-    local total_seconds
-    total_seconds=$(echo "scale=6; $frame * $fps_den / $fps_num" | bc -l)
+	# Calculate total seconds
+	local total_seconds
+	total_seconds=$(echo "scale=6; $frame * $fps_den / $fps_num" | bc -l)
 
-    # Extract hours, minutes, seconds, and frame
-    local hours
-    hours=$(echo "$total_seconds / 3600" | bc)
-    local remaining
-    remaining=$(echo "scale=6; $total_seconds - $hours * 3600" | bc -l)
-    local minutes
-    minutes=$(echo "$remaining / 60" | bc)
-    local seconds
-    seconds=$(echo "scale=6; $remaining - $minutes * 60" | bc -l)
+	# Extract hours, minutes, seconds, and frame
+	local hours
+	hours=$(echo "$total_seconds / 3600" | bc)
+	local remaining
+	remaining=$(echo "scale=6; $total_seconds - $hours * 3600" | bc -l)
+	local minutes
+	minutes=$(echo "$remaining / 60" | bc)
+	local seconds
+	seconds=$(echo "scale=6; $remaining - $minutes * 60" | bc -l)
 
-    # Calculate frame within the second
-    local frame_in_second
-    frame_in_second=$(echo "scale=0; ($seconds - ($seconds / 1 * 1)) * $fps" | bc -l)
-    local whole_seconds
-    whole_seconds=$(echo "scale=0; $seconds / 1" | bc)
+	# Calculate frame within the second
+	local frame_in_second
+	frame_in_second=$(echo "scale=0; ($seconds - ($seconds / 1 * 1)) * $fps" | bc -l)
+	local whole_seconds
+	whole_seconds=$(echo "scale=0; $seconds / 1" | bc)
 
-    printf "%02d:%02d:%02d.%02.0f" "$hours" "$minutes" "$whole_seconds" "$frame_in_second"
+	printf "%02d:%02d:%02d.%02.0f" "$hours" "$minutes" "$whole_seconds" "$frame_in_second"
 }
 
 # Preview segment information and get confirmation
 preview_segments() {
-    log "${BLUE}=== Media Configuration Preview ===${NC}"
-    log "${GREEN}Configuration:${NC} $CONFIG_FILE"
-    log "${GREEN}Output:${NC}        $OUTPUT_DIR/$FINAL_OUTPUT"
-    log ""
+	log "${BLUE}=== Media Configuration Preview ===${NC}"
+	log "${GREEN}Configuration:${NC} $CONFIG_FILE"
+	log "${GREEN}Output:${NC}        $OUTPUT_DIR/$FINAL_OUTPUT"
+	log ""
 
-    # Display media specifications
-    show_media_specs
-    log ""
+	# Display media specifications
+	show_media_specs
+	log ""
 
-    log "${BLUE}=== Segment Structure Preview ===${NC}"
+	log "${BLUE}=== Segment Structure Preview ===${NC}"
 
-    # Table header with frame count column
-    printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "SECTION_TYPE" "SECTION_NAME" "START_FRAME" "END_FRAME" "FRAME_COUNT" "TIMESTAMP"
-    printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "============" "============" "===========" "=========" "===========" "======================="
+	# Table header with frame count column
+	printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "SECTION_TYPE" "SECTION_NAME" "START_FRAME" "END_FRAME" "FRAME_COUNT" "TIMESTAMP"
+	printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "============" "============" "===========" "=========" "===========" "======================="
 
-    for segment_data in "${SEGMENTS[@]}"; do
-        IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+	for segment_data in "${SEGMENTS[@]}"; do
+		IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
 
-        local start_timecode
-        start_timecode=$(frame_to_timecode "$start_frame")
-        local end_timecode
-        end_timecode=$(frame_to_timecode "$end_frame")
+		local start_timecode
+		start_timecode=$(frame_to_timecode "$start_frame")
+		local end_timecode
+		end_timecode=$(frame_to_timecode "$end_frame")
 
-        # Calculate frame count for this segment
-        local frame_count=$((end_frame - start_frame + 1))
+		# Calculate frame count for this segment
+		local frame_count=$((end_frame - start_frame + 1))
 
-        # Calculate duration for this segment
-        local duration
-        duration=$(calculate_duration "$start_frame" "$end_frame")
-        # Format duration with decimal point alignment (supports up to 9999.999)
-        local formatted_duration
-        formatted_duration=$(printf "%7.3f" "$duration")
+		# Calculate duration for this segment
+		local duration
+		duration=$(calculate_duration "$start_frame" "$end_frame")
+		# Format duration with decimal point alignment (supports up to 9999.999)
+		local formatted_duration
+		formatted_duration=$(printf "%7.3f" "$duration")
 
-        printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "$type" "$name" "$start_frame" "$end_frame" "$frame_count" "$start_timecode - $end_timecode (${formatted_duration}s)"
-    done
+		printf "%-15s %-20s %-12s %-12s %-12s %-25s\n" "$type" "$name" "$start_frame" "$end_frame" "$frame_count" "$start_timecode - $end_timecode (${formatted_duration}s)"
+	done
 
-    log ""
+	log ""
 
-    if [[ "$SKIP_CONFIRMATION" == true ]]; then
-        log "${GREEN}Auto-confirmed with -y option. Starting generation...${NC}"
-        return 0
-    fi
+	if [[ "$SKIP_CONFIRMATION" == true ]]; then
+		log "${GREEN}Auto-confirmed with -y option. Starting generation...${NC}"
+		return 0
+	fi
 
-    echo -n -e "${YELLOW}Start generation? (y/N): ${NC}"
-    read -r response
-    case "$response" in
-        [yY]|[yY][eE][sS])
-            log "${GREEN}Starting generation...${NC}"
-            return 0
-            ;;
-        *)
-            log "${YELLOW}Generation cancelled by user${NC}"
-            exit 0
-            ;;
-    esac
+	echo -n -e "${YELLOW}Start generation? (y/N): ${NC}"
+	read -r response
+	case "$response" in
+		[yY]|[yY][eE][sS])
+			log "${GREEN}Starting generation...${NC}"
+			return 0
+			;;
+		*)
+			log "${YELLOW}Generation cancelled by user${NC}"
+			exit 0
+			;;
+	esac
 }
 
 # Generate main program segment with enhanced logo for stable logo detection
 generate_main_segment() {
-    local segment_name=$1
-    local duration=$2
-    local output_file=$3
+	local segment_name=$1
+	local duration=$2
+	local output_file=$3
 
-    ffmpeg -y \
-        -f lavfi -i "pal75bars=size=1920x1080:rate=${CONFIG[FRAME_RATE]}:duration=$duration,crop=${CONFIG[VIDEO_WIDTH]}:${CONFIG[VIDEO_HEIGHT]}:'mod(24*t,1920-${CONFIG[VIDEO_WIDTH]})':0" \
-        -f lavfi -i "anoisesrc=c=pink:r=${CONFIG[AUDIO_SAMPLE_RATE]}:d=$duration,equalizer=f=200:width_type=o:width=1:g=3,aformat=channel_layouts=stereo" \
-        -filter_complex "
-            [0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
-            drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10,
-            drawtext=fontfile='Ubuntu\:style=Bold':fontsize=40:fontcolor=white@0.35:text='JTV-Gen':x=w-text_w-40:y=40:box=0,
-            format=yuv420p[v];
-            [1:a]volume=-14dB,alimiter=limit=-3dB:attack=5:release=50[a]
-        " \
-        -map "[v]" -map "[a]" \
-        -c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 \
-        -profile:v main -level:v high \
-        -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-        -minrate "${CONFIG[VIDEO_BITRATE_MIN]}" -b:v "${CONFIG[VIDEO_BITRATE_AVG]}" -maxrate "${CONFIG[VIDEO_BITRATE_MAX]}" -bufsize 9781248 \
-        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -strict -2 -aac_coder twoloop \
-        -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-        -f mpegts "$output_file" 2>> "$LOG_FILE"
+	ffmpeg -y -hide_banner \
+		-f lavfi -i "pal75bars=size=1920x1080:rate=${CONFIG[FRAME_RATE]}:duration=$duration,crop=${CONFIG[VIDEO_WIDTH]}:${CONFIG[VIDEO_HEIGHT]}:'mod(24*t,1920-${CONFIG[VIDEO_WIDTH]})':0" \
+		-f lavfi -i "anoisesrc=c=pink:r=${CONFIG[AUDIO_SAMPLE_RATE]}:d=$duration,equalizer=f=200:width_type=o:width=1:g=3,aformat=channel_layouts=stereo" \
+		-filter_complex "
+			[0:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=60:fontcolor=white:text='$segment_name':x=(w-text_w)/2:y=(h-text_h)/2-80:box=1:boxcolor=black@0.8:boxborderw=10,
+			drawtext=fontfile='Ubuntu\:style=Bold':fontsize=35:fontcolor=yellow:text='TIMECODE\: %{pts\:hms}':x=(w-text_w)/2:y=(h-text_h)/2+40:box=1:boxcolor=black@0.8:boxborderw=10,
+			drawtext=fontfile='Ubuntu\:style=Bold':fontsize=40:fontcolor=white@0.35:text='JTV-Gen':x=w-text_w-40:y=40:box=0,
+			setpts=PTS-STARTPTS,fps=${CONFIG[FRAME_RATE]},format=yuv420p[v];
+			[1:a]volume=-14dB,alimiter=limit=-3dB:attack=5:release=50,asetpts=PTS-STARTPTS[a]
+		" \
+		-map "[v]" -map "[a]" \
+		-c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 -profile:v main -level:v high \
+		-pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+		-minrate "${CONFIG[VIDEO_BITRATE_MIN]}" -b:v "${CONFIG[VIDEO_BITRATE_AVG]}" -maxrate "${CONFIG[VIDEO_BITRATE_MAX]}" -bufsize 9781248 \
+		-c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+		-b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
+		-fflags +genpts \
+		-avoid_negative_ts make_zero \
+		-muxdelay 0 -muxpreload 0 \
+		"$output_file" 2>> "$LOG_FILE"
 }
 
 # Generate CM segment with silence padding and color inversion
 generate_cm_segment() {
-    local segment_name=$1
-    local duration=$2
-    local output_file=$3
-    local silence_dur=0.5
-    local content_dur
-    content_dur=$(echo "scale=6; $duration - 2 * $silence_dur" | bc -l)
+	local segment_name=$1
+	local duration=$2
+	local output_file=$3
+	local silence_dur=0.5
+	local content_dur
+	content_dur=$(echo "scale=6; $duration - 2 * $silence_dur" | bc -l)
 
-    # Generate CM content (solid color with CM name)
-    local cm_number
-    cm_number=$(echo "$segment_name" | grep -o '[0-9]\+-[0-9]\+' | head -1)
-    [[ -z "$cm_number" ]] && cm_number="1-1"  # fallback
+	# Generate CM content (solid color with CM name)
+	local cm_number
+	cm_number=$(echo "$segment_name" | grep -o '[0-9]\+-[0-9]\+' | head -1)
+	[[ -z "$cm_number" ]] && cm_number="1-1"  # fallback
 
-    # Color selection for CM content
-    local colors=("red" "blue" "green" "yellow" "magenta" "cyan")
-    local color_hash
-    color_hash=$(echo "$segment_name" | md5sum | head -c 2)
-    local color_index=$(( (0x$color_hash) % ${#colors[@]}))
-    local color="${colors[$color_index]}"
+	# Color selection for CM content
+	local colors=("red" "blue" "green" "yellow" "magenta" "cyan")
+	local color_hash
+	color_hash=$(echo "$segment_name" | md5sum | head -c 2)
+	local color_index=$(( (0x$color_hash) % ${#colors[@]}))
+	local color="${colors[$color_index]}"
 
-    # All CMs use the same structure: silence(inverted) -> content(normal) -> silence(inverted)
-    ffmpeg -y \
-        -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
-        -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
-        -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$content_dur" \
-        -f lavfi -i "anoisesrc=c=white:r=${CONFIG[AUDIO_SAMPLE_RATE]}:d=$content_dur,equalizer=f=4000:width_type=o:width=1:g=2,aformat=channel_layouts=stereo" \
-        -f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
-        -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
-        -filter_complex "
-            [0:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
-            [1:a]volume=-70dB[a_silence1];
-            [2:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
-            [3:a]volume=-14dB,alimiter=limit=-3dB:attack=5:release=50[a_content];
-            [4:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
-            [5:a]volume=-70dB[a_silence2];
-            [v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated][a];
-            [concatenated]format=yuv420p[v]
-        " \
-        -map "[v]" -map "[a]" \
-        -c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 \
-        -profile:v main -level:v high \
-        -pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
-        -minrate "${CONFIG[VIDEO_BITRATE_MIN]}" -b:v "${CONFIG[VIDEO_BITRATE_AVG]}" -maxrate "${CONFIG[VIDEO_BITRATE_MAX]}" -bufsize 9781248 \
-        -c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" -strict -2 -aac_coder twoloop \
-        -b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
-        -f mpegts "$output_file" 2>> "$LOG_FILE"
+	# All CMs use the same structure: silence(inverted) -> content(normal) -> silence(inverted)
+	ffmpeg -y -hide_banner \
+		-f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
+		-f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
+		-f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$content_dur" \
+		-f lavfi -i "anoisesrc=c=white:r=${CONFIG[AUDIO_SAMPLE_RATE]}:d=$content_dur,equalizer=f=4000:width_type=o:width=1:g=2,aformat=channel_layouts=stereo" \
+		-f lavfi -i "color=$color:size=${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]}:rate=${CONFIG[FRAME_RATE]}:duration=$silence_dur" \
+		-f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${CONFIG[AUDIO_SAMPLE_RATE]}:duration=$silence_dur" \
+		-filter_complex "
+			[0:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence1];
+			[1:a]volume=-70dB[a_silence1];
+			[2:v]drawtext=fontfile='Ubuntu\:style=Bold':fontsize=100:fontcolor=white:text='CM $cm_number':x=(w-text_w)/2:y=(h-text_h)/2[v_content];
+			[3:a]volume=-14dB,alimiter=limit=-3dB:attack=5:release=50[a_content];
+			[4:v]negate,drawtext=fontfile='Ubuntu\:style=Bold':fontsize=80:fontcolor=black:text='SILENCE':x=(w-text_w)/2:y=(h-text_h)/2[v_silence2];
+			[5:a]volume=-70dB[a_silence2];
+			[v_silence1][a_silence1][v_content][a_content][v_silence2][a_silence2]concat=n=3:v=1:a=1[concatenated_v][concatenated_a];
+			[concatenated_v]setpts=PTS-STARTPTS,fps=${CONFIG[FRAME_RATE]},format=yuv420p[v];
+			[concatenated_a]asetpts=PTS-STARTPTS[a]
+		" \
+		-map "[v]" -map "[a]" \
+		-c:v "${CONFIG[VIDEO_CODEC]}" -aspect 16:9 -profile:v main -level:v high \
+		-pix_fmt yuv420p -colorspace bt709 -color_trc bt709 -color_primaries bt709 -color_range tv \
+		-minrate "${CONFIG[VIDEO_BITRATE_MIN]}" -b:v "${CONFIG[VIDEO_BITRATE_AVG]}" -maxrate "${CONFIG[VIDEO_BITRATE_MAX]}" -bufsize 9781248 \
+		-c:a "${CONFIG[AUDIO_CODEC]}" -profile:a "${CONFIG[AUDIO_PROFILE]}" \
+		-b:a "${CONFIG[AUDIO_BITRATE]}" -ar "${CONFIG[AUDIO_SAMPLE_RATE]}" -ac "${CONFIG[AUDIO_CHANNELS]}" \
+		-fflags +genpts \
+		-avoid_negative_ts make_zero \
+		-muxdelay 0 -muxpreload 0 \
+		"$output_file" 2>> "$LOG_FILE"
 }
 
 # Calculate optimal number of parallel jobs
 calculate_max_jobs() {
-    local cpu_count
-    cpu_count=$(nproc 2>/dev/null || echo "2")
-    local max_jobs=$((cpu_count / 2))
+	local cpu_count
+	cpu_count=$(nproc 2>/dev/null || echo "2")
+	local max_jobs=$((cpu_count / 2))
 
-    # Ensure at least 1 job
-    if [[ $max_jobs -lt 1 ]]; then
-        max_jobs=1
-    fi
+	# Ensure at least 1 job
+	if [[ $max_jobs -lt 1 ]]; then
+		max_jobs=1
+	fi
 
-    # Cap at 4 jobs maximum
-    if [[ $max_jobs -gt 4 ]]; then
-        max_jobs=4
-    fi
+	# Cap at 4 jobs maximum
+	if [[ $max_jobs -gt 4 ]]; then
+		max_jobs=4
+	fi
 
-    echo "$max_jobs"
+	echo "$max_jobs"
 }
 
 # Sort segments by frame count (descending order)
 sort_segments_by_frames() {
-    local sorted_segments=()
+	local sorted_segments=()
 
-    # Create array with frame counts for sorting
-    local segments_with_counts=()
-    for segment_data in "${SEGMENTS[@]}"; do
-        IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
-        [[ "$type" == "RecMargin" ]] && continue
+	# Create array with frame counts for sorting
+	local segments_with_counts=()
+	for segment_data in "${SEGMENTS[@]}"; do
+		IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+		[[ "$type" == "RecMargin" ]] && continue
 
-        local frame_count=$((end_frame - start_frame + 1))
-        segments_with_counts+=("$frame_count|$segment_data")
-    done
+		local frame_count=$((end_frame - start_frame + 1))
+		segments_with_counts+=("$frame_count|$segment_data")
+	done
 
-    # Sort by frame count (descending)
-    mapfile -t sorted_array < <(printf '%s\n' "${segments_with_counts[@]}" | sort -nr)
+	# Sort by frame count (descending)
+	mapfile -t sorted_array < <(printf '%s\n' "${segments_with_counts[@]}" | sort -nr)
 
-    # Extract sorted segments
-    for entry in "${sorted_array[@]}"; do
-        local segment_data="${entry#*|}"
-        sorted_segments+=("$segment_data")
-    done
+	# Extract sorted segments
+	for entry in "${sorted_array[@]}"; do
+		local segment_data="${entry#*|}"
+		sorted_segments+=("$segment_data")
+	done
 
-    # Update SEGMENTS array
-    SEGMENTS=("${sorted_segments[@]}")
+	# Update SEGMENTS array
+	SEGMENTS=("${sorted_segments[@]}")
 }
 
 # Process segment asynchronously in background
 process_segment_async() {
-    local segment_data=$1
-    local segment_index=$2
-    local total_segments=$3
+	local segment_data=$1
+	local segment_index=$2
+	local total_segments=$3
 
-    IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+	IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
 
-    local frame_duration=$((end_frame - start_frame + 1))
-    local time_duration
-    time_duration=$(calculate_duration "$start_frame" $((end_frame + 1)))
-    local output_file
-    output_file="$TEMP_DIR/segment_$(printf "%03d" "$segment_index")_${name}.ts"
+	local frame_duration=$((end_frame - start_frame + 1))
+	local time_duration
+	time_duration=$(calculate_duration "$start_frame" $((end_frame + 1)))
+	local output_file
+	output_file="$TEMP_DIR/segment_$(printf "%03d" "$segment_index")_${name}.ts"
 
-    [[ "$DEBUG" == true ]] && log "${YELLOW}Background processing segment: $type,$name,$start_frame,$end_frame${NC}"
+	[[ "$DEBUG" == true ]] && log "${YELLOW}Background processing segment: $type,$name,$start_frame,$end_frame${NC}"
 
-    case "$type" in
-        "Main")
-            generate_main_segment "$name" "$time_duration" "$output_file" || {
-                echo "ERROR:$name" > "$TEMP_DIR/error_$segment_index"
-                exit 1
-            }
-            ;;
-        "CM")
-            generate_cm_segment "$name" "$time_duration" "$output_file" || {
-                echo "ERROR:$name" > "$TEMP_DIR/error_$segment_index"
-                exit 1
-            }
-            ;;
-    esac
+	case "$type" in
+		"Main")
+			generate_main_segment "$name" "$time_duration" "$output_file" || {
+				echo "ERROR:$name" > "$TEMP_DIR/error_$segment_index"
+				exit 1
+			}
+			;;
+		"CM")
+			generate_cm_segment "$name" "$time_duration" "$output_file" || {
+				echo "ERROR:$name" > "$TEMP_DIR/error_$segment_index"
+				exit 1
+			}
+			;;
+	esac
 
-    # Mark completion
-    echo "COMPLETED:$segment_index:$name:$frame_duration" > "$TEMP_DIR/completed_$segment_index"
+	# Mark completion
+	echo "COMPLETED:$segment_index:$name:$frame_duration" > "$TEMP_DIR/completed_$segment_index"
 }
 
 # Update progress display when segment completes
 update_progress() {
-    local completed_count=$1
-    local total_segments=$2
-    local completed_name=$3
+	local completed_count=$1
+	local total_segments=$2
+	local completed_name=$3
 
-    local progress
-    progress=$(echo "scale=2; $completed_count * 100 / $total_segments" | bc -l)
+	local progress
+	progress=$(echo "scale=2; $completed_count * 100 / $total_segments" | bc -l)
 
-    log "${GREEN}Overall: $(printf "%03d" "$completed_count")/$(printf "%03d" "$total_segments") ($(printf "%06.2f" "$progress")%)${NC}"
-    log "${GREEN}Completed: $completed_name${NC}"
+	log "${GREEN}Overall: $(printf "%03d" "$completed_count")/$(printf "%03d" "$total_segments") ($(printf "%06.2f" "$progress")%)${NC}"
+	log "${GREEN}Completed: $completed_name${NC}"
 }
 
 # Generate all segments asynchronously
 generate_segments() {
-    log "${BLUE}Generating individual segments${NC}"
+	log "${BLUE}Generating individual segments${NC}"
 
-    mkdir -p "$TEMP_DIR"
+	mkdir -p "$TEMP_DIR"
 
-    # Get optimal number of parallel jobs
-    local max_jobs
-    max_jobs=$(calculate_max_jobs)
-    log "${BLUE}Using $max_jobs parallel jobs (CPU cores: $(nproc 2>/dev/null || echo "unknown"))${NC}"
+	# Get optimal number of parallel jobs
+	local max_jobs
+	max_jobs=$(calculate_max_jobs)
+	log "${BLUE}Using $max_jobs parallel jobs (CPU cores: $(nproc 2>/dev/null || echo "unknown"))${NC}"
 
-    # Preserve original order BEFORE sorting
-    local original_segments=("${SEGMENTS[@]}")
-    declare -A original_order_map
-    local original_index=0
-    for segment_data in "${original_segments[@]}"; do
-        IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
-        if [[ "$type" != "RecMargin" ]]; then
-            original_order_map["$segment_data"]="$original_index"
-        fi
-        original_index=$((original_index + 1))
-    done
+	# Preserve original order BEFORE sorting
+	local original_segments=("${SEGMENTS[@]}")
+	declare -A original_order_map
+	local original_index=0
+	for segment_data in "${original_segments[@]}"; do
+		IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+		if [[ "$type" != "RecMargin" ]]; then
+			original_order_map["$segment_data"]="$original_index"
+		fi
+		original_index=$((original_index + 1))
+	done
 
-    # Sort segments by frame count (heaviest first)
-    sort_segments_by_frames
+	# Sort segments by frame count (heaviest first)
+	sort_segments_by_frames
 
-    # Count total segments (excluding RecMargin) and get original indices
-    local total_segments=0
-    local segment_list=()
-    local original_indices=()
-    for segment_data in "${SEGMENTS[@]}"; do
-        IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
-        if [[ "$type" != "RecMargin" ]]; then
-            segment_list+=("$segment_data")
-            original_indices+=("${original_order_map["$segment_data"]}")
-            total_segments=$((total_segments + 1))
-        fi
-    done
+	# Count total segments (excluding RecMargin) and get original indices
+	local total_segments=0
+	local segment_list=()
+	local original_indices=()
+	for segment_data in "${SEGMENTS[@]}"; do
+		IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+		if [[ "$type" != "RecMargin" ]]; then
+			segment_list+=("$segment_data")
+			original_indices+=("${original_order_map["$segment_data"]}")
+			total_segments=$((total_segments + 1))
+		fi
+	done
 
-    log "${BLUE}Processing $total_segments segments asynchronously${NC}"
+	log "${BLUE}Processing $total_segments segments asynchronously${NC}"
 
-    # Clean up any existing completion markers
-    rm -f "$TEMP_DIR"/completed_* "$TEMP_DIR"/error_*
+	# Clean up any existing completion markers
+	rm -f "$TEMP_DIR"/completed_* "$TEMP_DIR"/error_*
 
-    local active_jobs=0
-    local completed_jobs=0
-    local segment_index=0
-    local pids=()
-    local segment_indices=()
+	local active_jobs=0
+	local completed_jobs=0
+	local segment_index=0
+	local pids=()
+	local segment_indices=()
 
-    # Process segments
-    for i in "${!segment_list[@]}"; do
-        local segment_data="${segment_list[$i]}"
-        local original_segment_index="${original_indices[$i]}"
-        # Wait if we've reached max jobs
-        while [[ $active_jobs -ge $max_jobs ]]; do
-            # Check for completed jobs
-            for j in "${!pids[@]}"; do
-                local pid="${pids[$j]}"
-                local seg_index="${segment_indices[$j]}"
-                if ! kill -0 "$pid" 2>/dev/null; then
-                    # Job finished, remove from active list
-                    unset "pids[$j]"
-                    unset "segment_indices[$j]"
-                    active_jobs=$((active_jobs - 1))
+	# Process segments
+	for i in "${!segment_list[@]}"; do
+		local segment_data="${segment_list[$i]}"
+		local original_segment_index="${original_indices[$i]}"
+		# Wait if we've reached max jobs
+		while [[ $active_jobs -ge $max_jobs ]]; do
+			# Check for completed jobs
+			for j in "${!pids[@]}"; do
+				local pid="${pids[$j]}"
+				local seg_index="${segment_indices[$j]}"
+				if ! kill -0 "$pid" 2>/dev/null; then
+					# Job finished, remove from active list
+					unset "pids[$j]"
+					unset "segment_indices[$j]"
+					active_jobs=$((active_jobs - 1))
 
-                    # Check for completion or error
-                    if [[ -f "$TEMP_DIR/completed_$seg_index" ]]; then
-                        local completion_info
-                        completion_info=$(cat "$TEMP_DIR/completed_$seg_index")
-                        IFS=':' read -r _ _ comp_name _ <<< "$completion_info"
-                        completed_jobs=$((completed_jobs + 1))
-                        update_progress "$completed_jobs" "$total_segments" "$comp_name"
-                    elif [[ -f "$TEMP_DIR/error_$seg_index" ]]; then
-                        local error_info
-                        error_info=$(cat "$TEMP_DIR/error_$seg_index")
-                        log "${RED}Error in background job: $error_info${NC}"
-                        # Kill remaining jobs
-                        for remaining_pid in "${pids[@]}"; do
-                            [[ -n "$remaining_pid" ]] && kill "$remaining_pid" 2>/dev/null
-                        done
-                        exit 1
-                    fi
-                fi
-            done
+					# Check for completion or error
+					if [[ -f "$TEMP_DIR/completed_$seg_index" ]]; then
+						local completion_info
+						completion_info=$(cat "$TEMP_DIR/completed_$seg_index")
+						IFS=':' read -r _ _ comp_name _ <<< "$completion_info"
+						completed_jobs=$((completed_jobs + 1))
+						update_progress "$completed_jobs" "$total_segments" "$comp_name"
+					elif [[ -f "$TEMP_DIR/error_$seg_index" ]]; then
+						local error_info
+						error_info=$(cat "$TEMP_DIR/error_$seg_index")
+						log "${RED}Error in background job: $error_info${NC}"
+						# Kill remaining jobs
+						for remaining_pid in "${pids[@]}"; do
+							[[ -n "$remaining_pid" ]] && kill "$remaining_pid" 2>/dev/null
+						done
+						exit 1
+					fi
+				fi
+			done
 
-            # Clean up the pids array
-            local temp_pids=()
-            local temp_indices=()
-            for k in "${!pids[@]}"; do
-                if [[ -n "${pids[$k]}" ]]; then
-                    temp_pids+=("${pids[$k]}")
-                    temp_indices+=("${segment_indices[$k]}")
-                fi
-            done
-            pids=("${temp_pids[@]}")
-            segment_indices=("${temp_indices[@]}")
+			# Clean up the pids array
+			local temp_pids=()
+			local temp_indices=()
+			for k in "${!pids[@]}"; do
+				if [[ -n "${pids[$k]}" ]]; then
+					temp_pids+=("${pids[$k]}")
+					temp_indices+=("${segment_indices[$k]}")
+				fi
+			done
+			pids=("${temp_pids[@]}")
+			segment_indices=("${temp_indices[@]}")
 
-            # Short sleep to avoid busy waiting
-            sleep 0.1
-        done
+			# Short sleep to avoid busy waiting
+			sleep 0.1
+		done
 
-        # Start new background job
-        process_segment_async "$segment_data" "$original_segment_index" "$total_segments" &
-        local bg_pid=$!
-        pids+=("$bg_pid")
-        segment_indices+=("$original_segment_index")
-        active_jobs=$((active_jobs + 1))
-        segment_index=$((segment_index + 1))
+		# Start new background job
+		process_segment_async "$segment_data" "$original_segment_index" "$total_segments" &
+		local bg_pid=$!
+		pids+=("$bg_pid")
+		segment_indices+=("$original_segment_index")
+		active_jobs=$((active_jobs + 1))
+		segment_index=$((segment_index + 1))
 
-        [[ "$DEBUG" == true ]] && log "${YELLOW}Started background job $bg_pid for segment $segment_index${NC}"
-    done
+		[[ "$DEBUG" == true ]] && log "${YELLOW}Started background job $bg_pid for segment $segment_index${NC}"
+	done
 
-    # Wait for all remaining jobs to complete
-    log "${BLUE}Waiting for remaining jobs to complete...${NC}"
-    while [[ $completed_jobs -lt $total_segments ]]; do
-        for m in "${!pids[@]}"; do
-            local pid="${pids[$m]}"
-            local seg_index="${segment_indices[$m]}"
-            if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
-                # Job finished
-                unset "pids[$m]"
-                unset "segment_indices[$m]"
-                active_jobs=$((active_jobs - 1))
+	# Wait for all remaining jobs to complete
+	log "${BLUE}Waiting for remaining jobs to complete...${NC}"
+	while [[ $completed_jobs -lt $total_segments ]]; do
+		for m in "${!pids[@]}"; do
+			local pid="${pids[$m]}"
+			local seg_index="${segment_indices[$m]}"
+			if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+				# Job finished
+				unset "pids[$m]"
+				unset "segment_indices[$m]"
+				active_jobs=$((active_jobs - 1))
 
-                # Check for completion or error
-                if [[ -f "$TEMP_DIR/completed_$seg_index" ]]; then
-                    local completion_info
-                    completion_info=$(cat "$TEMP_DIR/completed_$seg_index")
-                    IFS=':' read -r _ _ comp_name _ <<< "$completion_info"
-                    completed_jobs=$((completed_jobs + 1))
-                    update_progress "$completed_jobs" "$total_segments" "$comp_name"
-                elif [[ -f "$TEMP_DIR/error_$seg_index" ]]; then
-                    local error_info
-                    error_info=$(cat "$TEMP_DIR/error_$seg_index")
-                    log "${RED}Error in background job: $error_info${NC}"
-                    # Kill remaining jobs
-                    for remaining_pid in "${pids[@]}"; do
-                        [[ -n "$remaining_pid" ]] && kill "$remaining_pid" 2>/dev/null
-                    done
-                    exit 1
-                fi
-            fi
-        done
+				# Check for completion or error
+				if [[ -f "$TEMP_DIR/completed_$seg_index" ]]; then
+					local completion_info
+					completion_info=$(cat "$TEMP_DIR/completed_$seg_index")
+					IFS=':' read -r _ _ comp_name _ <<< "$completion_info"
+					completed_jobs=$((completed_jobs + 1))
+					update_progress "$completed_jobs" "$total_segments" "$comp_name"
+				elif [[ -f "$TEMP_DIR/error_$seg_index" ]]; then
+					local error_info
+					error_info=$(cat "$TEMP_DIR/error_$seg_index")
+					log "${RED}Error in background job: $error_info${NC}"
+					# Kill remaining jobs
+					for remaining_pid in "${pids[@]}"; do
+						[[ -n "$remaining_pid" ]] && kill "$remaining_pid" 2>/dev/null
+					done
+					exit 1
+				fi
+			fi
+		done
 
-        # Clean up the pids array
-        local temp_pids=()
-        local temp_indices=()
-        for i in "${!pids[@]}"; do
-            if [[ -n "${pids[$i]}" ]]; then
-                temp_pids+=("${pids[$i]}")
-                temp_indices+=("${segment_indices[$i]}")
-            fi
-        done
-        pids=("${temp_pids[@]}")
-        segment_indices=("${temp_indices[@]}")
+		# Clean up the pids array
+		local temp_pids=()
+		local temp_indices=()
+		for i in "${!pids[@]}"; do
+			if [[ -n "${pids[$i]}" ]]; then
+				temp_pids+=("${pids[$i]}")
+				temp_indices+=("${segment_indices[$i]}")
+			fi
+		done
+		pids=("${temp_pids[@]}")
+		segment_indices=("${temp_indices[@]}")
 
-        sleep 0.1
-    done
+		sleep 0.1
+	done
 
-    log "${GREEN}All $total_segments segments generated successfully${NC}"
+	log "${GREEN}All $total_segments segments generated successfully${NC}"
 
-    # Clean up completion markers
-    rm -f "$TEMP_DIR"/completed_* "$TEMP_DIR"/error_*
+	# Clean up completion markers
+	rm -f "$TEMP_DIR"/completed_* "$TEMP_DIR"/error_*
 }
 
 # Concatenate all segments
 concatenate_segments() {
-    log "${BLUE}Concatenating segments to intermediate output${NC}"
+	log "${BLUE}Concatenating segments to intermediate output${NC}"
 
-    # Create concat list
-    local concat_file="$TEMP_DIR/concat_list.txt"
-    : > "$concat_file"
+	# Create concat list
+	local concat_file="$TEMP_DIR/concat_list.txt"
+	: > "$concat_file"
 
-    # Sort segment files by their numeric index to maintain config order
-    for i in $(seq -f "%03g" 0 999); do
-        local file_pattern="$TEMP_DIR/segment_${i}_*.ts"
-        if compgen -G "$file_pattern" > /dev/null; then
-            for matched_file in $file_pattern; do
-                if [[ -f "$matched_file" ]]; then
-                    echo "file '../$matched_file'" >> "$concat_file"
-                fi
-            done
-        fi
-    done
+	# Sort segment files by their numeric index to maintain config order
+	for i in $(seq -f "%03g" 0 999); do
+		local file_pattern="$TEMP_DIR/segment_${i}_*.ts"
+		if compgen -G "$file_pattern" > /dev/null; then
+			for matched_file in $file_pattern; do
+				if [[ -f "$matched_file" ]]; then
+					echo "file '../$matched_file'" >> "$concat_file"
+				fi
+			done
+		fi
+	done
 
-    # Concatenate using stream copy (no re-encoding)
-    ffmpeg -y \
-        -f concat -safe 0 -i "$concat_file" \
-        -c copy \
-        -mpegts_service_id "${CONFIG[BROADCAST_SERVICE_ID]}" \
-        -mpegts_transport_stream_id "${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}" \
-        -metadata service_provider="${CONFIG[BROADCAST_SERVICE_PROVIDER]}" \
-        -metadata service_name="${CONFIG[BROADCAST_SERVICE_NAME]}" \
-        -mpegts_start_pid 273 \
-        -mpegts_pmt_start_pid 257 \
-        -muxrate "${CONFIG[VIDEO_BITRATE_AVG]}" \
-        -f mpegts \
-        "$TEMP_DIR/$FINAL_OUTPUT" 2>> "$LOG_FILE"
+	# Concatenate using stream copy (no re-encoding)
+	ffmpeg -y -hide_banner \
+		-fflags +genpts+igndts \
+		-avoid_negative_ts make_zero \
+		-f concat -safe 0 -i "$concat_file" \
+		-c:v copy -c:a copy \
+		-mpegts_service_id "${CONFIG[BROADCAST_SERVICE_ID]}" \
+		-mpegts_transport_stream_id "${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}" \
+		-mpegts_start_pid 273 \
+		-mpegts_pmt_start_pid 257 \
+		-metadata service_provider="${CONFIG[BROADCAST_SERVICE_PROVIDER]}" \
+		-metadata service_name="${CONFIG[BROADCAST_SERVICE_NAME]}" \
+		-f mpegts \
+		"$TEMP_DIR/$FINAL_OUTPUT" 2>> "$LOG_FILE"
 
-    log "${GREEN}Intermediate output created: $TEMP_DIR/$FINAL_OUTPUT${NC}"
+	log "${GREEN}Intermediate output created: $TEMP_DIR/$FINAL_OUTPUT${NC}"
 }
 
 # Generate optimized broadcast metadata files
 generate_metadata_files() {
-    log "${BLUE}Generating comprehensive PSI/SI tables${NC}"
+	log "${BLUE}Generating comprehensive PSI/SI tables${NC}"
 
-    mkdir -p "$OUTPUT_DIR"
-    mkdir -p "$TEMP_DIR"
+	mkdir -p "$OUTPUT_DIR"
+	mkdir -p "$TEMP_DIR"
 
-    # Calculate duration for EIT
-    local duration_hms
-    duration_hms=$(printf "%02d:%02d:%02d" $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}/3600)) $(((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%3600)/60)) $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%60)))
+	# Calculate duration for EIT
+	local duration_hms
+	duration_hms=$(printf "%02d:%02d:%02d" $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}/3600)) $(((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%3600)/60)) $((${CONFIG[BROADCAST_DURATION_SECONDS]%.*}%60)))
 
-    # PAT - Program Association Table (critical for new PID creation)
-    local pat_file="$TEMP_DIR/pat.xml"
-    cat > "$pat_file" << EOF
+	# PAT - Program Association Table
+	local pat_file="$TEMP_DIR/pat.xml"
+	cat > "$pat_file" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <tsduck>
   <PAT version="3" current="true" transport_stream_id="${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}" network_PID="16">
-    <service service_id="${CONFIG[BROADCAST_SERVICE_ID]}" program_map_PID="257"/>
+	<service service_id="${CONFIG[BROADCAST_SERVICE_ID]}" program_map_PID="257"/>
   </PAT>
 </tsduck>
 EOF
 
-    # CAT - Conditional Access Table
-    local cat_file="$TEMP_DIR/cat.xml"
-    cat > "$cat_file" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<tsduck>
-  <CAT version="1" current="true">
-  </CAT>
-</tsduck>
-EOF
-
-    # PMT - Program Map Table (critical for new PID creation)
-    local pmt_file="$TEMP_DIR/pmt.xml"
-    cat > "$pmt_file" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<tsduck>
-  <PMT version="12" current="true" service_id="${CONFIG[BROADCAST_SERVICE_ID]}" PCR_PID="273">
-    <component elementary_PID="273" stream_type="0x02">
-      <stream_identifier_descriptor component_tag="0"/>
-    </component>
-    <component elementary_PID="274" stream_type="0x0F">
-      <stream_identifier_descriptor component_tag="16"/>
-    </component>
-  </PMT>
-</tsduck>
-EOF
-
-    # NIT - Network Information Table
-    local nit_file="$TEMP_DIR/nit.xml"
-    cat > "$nit_file" << EOF
+	# NIT - Network Information Table
+	local nit_file="$TEMP_DIR/nit.xml"
+	cat > "$nit_file" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <tsduck>
   <NIT version="1" current="true" actual="true" network_id="${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}">
-    <network_name_descriptor network_name="${CONFIG[BROADCAST_NETWORK_NAME]}"/>
-    <transport_stream transport_stream_id="${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
-                      original_network_id="${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}">
-      <service_list_descriptor>
-        <service service_id="${CONFIG[BROADCAST_SERVICE_ID]}" service_type="1"/>
-      </service_list_descriptor>
-    </transport_stream>
+	<network_name_descriptor network_name="${CONFIG[BROADCAST_NETWORK_NAME]}"/>
+	<transport_stream transport_stream_id="${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
+					  original_network_id="${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}">
+	  <service_list_descriptor>
+		<service service_id="${CONFIG[BROADCAST_SERVICE_ID]}" service_type="1"/>
+	  </service_list_descriptor>
+	</transport_stream>
   </NIT>
 </tsduck>
 EOF
 
-    # EIT - Event Information Table
-    local eit_file="$TEMP_DIR/eit.xml"
-    cat > "$eit_file" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<tsduck>
-  <EIT version="1" current="true" actual="true"
-       service_id="${CONFIG[BROADCAST_SERVICE_ID]}"
-       transport_stream_id="${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
-       original_network_id="${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}"
-       last_table_id="78"
-       type="pf">
-    <event event_id="1001"
-           start_time="${CONFIG[BROADCAST_START_TIME]}"
-           duration="${duration_hms}"
-           running_status="running"
-           CA_mode="false">
-      <short_event_descriptor language_code="jpn">
-        <event_name>${CONFIG[BROADCAST_SERVICE_NAME]} Program</event_name>
-        <text>ARIB compliant test stream</text>
-      </short_event_descriptor>
-      <component_descriptor stream_content="1" stream_content_ext="15" component_type="3" component_tag="0" language_code="jpn" text=""/>
-      <content_descriptor>
-        <content content_nibble_level_1="0" content_nibble_level_2="0" user_byte="0"/>
-        <content content_nibble_level_1="1" content_nibble_level_2="0" user_byte="0"/>
-      </content_descriptor>
-    </event>
-  </EIT>
-</tsduck>
-EOF
-
-    # Generate SDT file with optimized structure
-    local sdt_file="$TEMP_DIR/sdt.xml"
-    cat > "$sdt_file" << EOF
+	# SDT - Service Description Table
+	local sdt_file="$TEMP_DIR/sdt.xml"
+	cat > "$sdt_file" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <tsduck>
   <SDT version="1" current="true" actual="true"
-       transport_stream_id="${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
-       original_network_id="${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}">
-    <service service_id="${CONFIG[BROADCAST_SERVICE_ID]}"
-             EIT_schedule="false"
-             EIT_present_following="true"
-             running_status="running"
-             CA_mode="false">
-      <service_descriptor
-          service_type="1"
-          service_provider_name="${CONFIG[BROADCAST_SERVICE_PROVIDER]}"
-          service_name="${CONFIG[BROADCAST_SERVICE_NAME]}"/>
-    </service>
+	   transport_stream_id="${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
+	   original_network_id="${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}">
+	<service service_id="${CONFIG[BROADCAST_SERVICE_ID]}"
+			 EIT_schedule="false"
+			 EIT_present_following="true"
+			 running_status="running"
+			 CA_mode="false">
+	  <service_descriptor
+		  service_type="1"
+		  service_provider_name="${CONFIG[BROADCAST_SERVICE_PROVIDER]}"
+		  service_name="${CONFIG[BROADCAST_SERVICE_NAME]}"/>
+	</service>
   </SDT>
 </tsduck>
 EOF
 
+	# EIT - Event Information Table (PF: Present/Following)
+	local eit_file="$TEMP_DIR/eit.xml"
+	cat > "$eit_file" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<tsduck>
+  <EIT version="1" current="true" actual="true"
+	   service_id="${CONFIG[BROADCAST_SERVICE_ID]}"
+	   transport_stream_id="${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
+	   original_network_id="${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}"
+	   last_table_id="78"
+	   type="pf">
+	<event event_id="1001"
+		   start_time="${CONFIG[BROADCAST_START_TIME]}"
+		   duration="${duration_hms}"
+		   running_status="running"
+		   CA_mode="false">
+	  <short_event_descriptor language_code="jpn">
+		<event_name>${CONFIG[BROADCAST_SERVICE_NAME]} Program</event_name>
+		<text>ARIB compliant test stream</text>
+	  </short_event_descriptor>
+	  <component_descriptor stream_content="1" stream_content_ext="15" component_type="3" component_tag="0" language_code="jpn" text=""/>
+	  <content_descriptor>
+		<content content_nibble_level_1="0" content_nibble_level_2="0" user_byte="0"/>
+		<content content_nibble_level_1="1" content_nibble_level_2="0" user_byte="0"/>
+	  </content_descriptor>
+	</event>
+  </EIT>
+</tsduck>
+EOF
 
-    # Generate TOT file with JST offset
-    local tot_file="$TEMP_DIR/tot.xml"
-    cat > "$tot_file" << EOF
+	# TOT - Time Offset Table
+	local tot_file="$TEMP_DIR/tot.xml"
+	cat > "$tot_file" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <tsduck>
   <TOT UTC_time="${CONFIG[BROADCAST_START_TIME]}">
-    <local_time_offset_descriptor>
-      <region country_code="JPN"
-              country_region_id="0"
-              local_time_offset="540"
-              time_of_change="2000-01-01 00:00:00"
-              next_time_offset="540"/>
-    </local_time_offset_descriptor>
+	<local_time_offset_descriptor>
+	  <region country_code="JPN"
+			  country_region_id="0"
+			  local_time_offset="540"
+			  time_of_change="2000-01-01 00:00:00"
+			  next_time_offset="540"/>
+	</local_time_offset_descriptor>
   </TOT>
 </tsduck>
 EOF
 
-    log "${GREEN}Generated comprehensive PSI/SI tables:${NC}"
-    log "${GREEN}  PAT:${NC}         temp/pat.xml (Program Association Table)"
-    log "${GREEN}  CAT:${NC}         temp/cat.xml (Conditional Access Table)"
-    log "${GREEN}  PMT:${NC}         temp/pmt.xml (Program Map Table)"
-    log "${GREEN}  NIT:${NC}         temp/nit.xml (Network Information Table)"
-    log "${GREEN}  SDT:${NC}         temp/sdt.xml (Service Description Table)"
-    log "${GREEN}  EIT:${NC}         temp/eit.xml (Event Information Table)"
-    log "${GREEN}  TOT:${NC}         temp/tot.xml (Time Offset Table)"
+	# PMT - Program Map Table
+	local pmt_file="$TEMP_DIR/pmt.xml"
+	cat > "$pmt_file" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<tsduck>
+  <PMT version="12" current="true" service_id="${CONFIG[BROADCAST_SERVICE_ID]}" PCR_PID="273">
+	<component elementary_PID="273" stream_type="0x02">
+	  <stream_identifier_descriptor component_tag="0"/>
+	</component>
+	<component elementary_PID="274" stream_type="0x0F">
+	  <stream_identifier_descriptor component_tag="16"/>
+	</component>
+  </PMT>
+</tsduck>
+EOF
+
+	log "${GREEN}Generated comprehensive PSI/SI tables:${NC}"
+	log "${GREEN}  PAT:${NC}         temp/pat.xml (Program Association Table)"
+	log "${GREEN}  NIT:${NC}         temp/nit.xml (Network Information Table)"
+	log "${GREEN}  SDT:${NC}         temp/sdt.xml (Service Description Table)"
+	log "${GREEN}  EIT:${NC}         temp/eit.xml (Event Information Table)"
+	log "${GREEN}  TOT:${NC}         temp/tot.xml (Time Offset Table)"
+	log "${GREEN}  PMT:${NC}         temp/pmt.xml (Program Map Table)"
 }
 
 # Inject comprehensive PSI/SI metadata
 inject_eit_metadata() {
-    if [[ "$INJECT_EIT" != true ]]; then
-        log "${BLUE}Skipping EIT injection (--skip-eit specified)${NC}"
-        return 0
-    fi
+	log "${BLUE}Injecting comprehensive PSI/SI metadata${NC}"
 
-    log "${BLUE}Injecting comprehensive PSI/SI metadata${NC}"
+	local input_file="$TEMP_DIR/$FINAL_OUTPUT"
+	local tables_dir="$TEMP_DIR"
+	local output_file="$TEMP_DIR/${FINAL_OUTPUT%.ts}_with_metadata.ts"
 
-    local input_file="$TEMP_DIR/$FINAL_OUTPUT"
-    local tables_dir="$TEMP_DIR"
-    local output_file="$TEMP_DIR/${FINAL_OUTPUT%.ts}_with_metadata.ts"
+	# Input file check
+	if [[ ! -f "$input_file" ]]; then
+		log "${RED}Error: Input file $input_file not found${NC}"
+		return 1
+	fi
 
-    # Input file check
-    if [[ ! -f "$input_file" ]]; then
-        log "${RED}Error: Input file $input_file not found${NC}"
-        return 1
-    fi
+	# Compile XML tables to binary
+	log "${YELLOW}Compiling PSI/SI tables${NC}"
+	local required_tables=("pat" "pmt" "nit" "sdt" "eit" "tot")
+	for table in "${required_tables[@]}"; do
+		if [[ -f "$tables_dir/${table}.xml" ]]; then
+			log "${BLUE}Compiling ${table}.xml${NC}"
+			if ! tstabcomp --japan "$tables_dir/${table}.xml" -o "$tables_dir/${table}.bin" 2>> "$LOG_FILE"; then
+				log "${RED}Error: Failed to compile ${table}.xml${NC}"
+				log "${RED}Check log file: $LOG_FILE${NC}"
+				return 1
+			else
+				log "${GREEN}✓ ${table}.bin compiled successfully${NC}"
+			fi
+		else
+			log "${YELLOW}Warning: ${table}.xml not found, skipping${NC}"
+		fi
+	done
 
-    # Compile XML tables to binary
-    log "${YELLOW}Compiling PSI/SI tables${NC}"
-    local required_tables=("pat" "cat" "pmt" "nit" "sdt" "eit" "tot")
-    for table in "${required_tables[@]}"; do
-        if [[ -f "$tables_dir/${table}.xml" ]]; then
-            log "${BLUE}Compiling ${table}.xml${NC}"
-            if ! tstabcomp --japan "$tables_dir/${table}.xml" -o "$tables_dir/${table}.bin" 2>> "$LOG_FILE"; then
-                log "${RED}Error: Failed to compile ${table}.xml${NC}"
-                log "${RED}Check log file: $LOG_FILE${NC}"
-                return 1
-            else
-                log "${GREEN}✓ ${table}.bin compiled successfully${NC}"
-            fi
-        else
-            log "${YELLOW}Warning: ${table}.xml not found, skipping${NC}"
-        fi
-    done
+	# Optimized injection using single tsp pipeline
+	log "${YELLOW}Injecting PSI/SI tables${NC}"
 
-    # Optimized injection using single tsp pipeline
-    log "${YELLOW}Injecting PSI/SI tables using optimized method${NC}"
+	# Check which tables are available (comprehensive PSI/SI)
+	local available_tables=()
+	for table in pat cat pmt nit sdt eit tot; do
+		if [[ -f "$tables_dir/${table}.bin" ]]; then
+			available_tables+=("$table")
+			log "${GREEN}✓ ${table}.bin ready for injection${NC}"
+		else
+			log "${YELLOW}⚠ ${table}.bin not available${NC}"
+		fi
+	done
 
-    # Use 最適化された frequencies
-    local optimized_mode="${CONFIG[LOGO_OPTIMIZED_MODE]:-true}"
+	if [[ ${#available_tables[@]} -eq 0 ]]; then
+		log "${RED}Error: No PSI/SI tables available for injection${NC}"
+		return 1
+	fi
 
-    # Check which tables are available (comprehensive PSI/SI)
-    local available_tables=()
-    for table in pat cat pmt nit sdt eit tot; do
-        if [[ -f "$tables_dir/${table}.bin" ]]; then
-            available_tables+=("$table")
-            log "${GREEN}✓ ${table}.bin ready for injection${NC}"
-        else
-            log "${YELLOW}⚠ ${table}.bin not available${NC}"
-        fi
-    done
+	log "${BLUE}Starting injection with ${#available_tables[@]} tables${NC}"
+	# Comprehensive PSI/SI injection
+	log "${BLUE}Using comprehensive PSI/SI injection${NC}"
+	local tsp_cmd="tsp --japan --add-input-stuffing 1/25 -I file \"$input_file\""
 
-    if [[ ${#available_tables[@]} -eq 0 ]]; then
-        log "${RED}Error: No PSI/SI tables available for injection${NC}"
-        return 1
-    fi
+	# PAT injection (PID 0)
+	if [[ -f "$tables_dir/pat.bin" ]]; then
+		tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pat.bin\" --pid 0 --replace"
+	fi
 
-    log "${BLUE}Starting injection with ${#available_tables[@]} tables${NC}"
+	# NIT injection (PID 16)
+	if [[ -f "$tables_dir/nit.bin" ]]; then
+		tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet $((  1000/4 ))"
+	fi
 
-    if [[ "$optimized_mode" == "true" ]]; then
-        # Comprehensive PSI/SI injection
-        log "${BLUE}Using comprehensive PSI/SI injection${NC}"
-        local tsp_cmd="tsp --japan -I file \"$input_file\" -P pcradjust -P timeref"
+	# SDT injection (PID 17)
+	if [[ -f "$tables_dir/sdt.bin" ]]; then
+		tsp_cmd="$tsp_cmd -P inject \"$tables_dir/sdt.bin\" --pid 17 --replace"
+	fi
 
-        # PAT injection (PID 0) - critical foundation table (replace existing)
-        if [[ -f "$tables_dir/pat.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pat.bin\" --pid 0 --replace"
-        fi
+	# EIT injection (PID 18)
+	if [[ -f "$tables_dir/eit.bin" ]]; then
+		tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet $((  1000/4 ))"
+	fi
 
-        # CAT injection (PID 1) - based on terrestrial TV analysis: ~10 seconds
-        if [[ -f "$tables_dir/cat.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/cat.bin\" --pid 1 --inter-packet 2500"
-        fi
+	# TOT injection (PID 20)
+	if [[ -f "$tables_dir/tot.bin" ]]; then
+		tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet $(( 10000/4 ))"
+	fi
 
-        # NIT injection (PID 16) - based on terrestrial TV analysis: ~1 second
-        if [[ -f "$tables_dir/nit.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet 250"
-        fi
+	# PMT injection (PID 257)
+	if [[ -f "$tables_dir/pmt.bin" ]]; then
+		tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pmt.bin\" --pid 257 --replace"
+	fi
 
-        # SDT injection (PID 17) - service description (replace existing)
-        if [[ -f "$tables_dir/sdt.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/sdt.bin\" --pid 17 --replace"
-        fi
+	tsp_cmd="$tsp_cmd -P continuity --fix -O file \"$output_file\""
 
-        # EIT injection (PID 18) - based on terrestrial TV analysis: ~1 second
-        if [[ -f "$tables_dir/eit.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 250"
-        fi
+	log "${BLUE}Executing: $tsp_cmd${NC}"
+	eval "$tsp_cmd" 2>&1 | tee -a "$LOG_FILE"
+	local injection_result=${PIPESTATUS[0]}
 
-        # TOT injection (PID 20) - based on terrestrial TV analysis: ~5 seconds
-        if [[ -f "$tables_dir/tot.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 1250"
-        fi
+	if [[ $injection_result -ne 0 ]]; then
+		log "${RED}Error: TSDuck injection failed with exit code $injection_result${NC}"
+		return 1
+	fi
 
-        # PMT injection (PID 257) - program definition (replace existing)
-        if [[ -f "$tables_dir/pmt.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pmt.bin\" --pid 257 --replace"
-        fi
+	# Result verification
+	if [[ -f "$output_file" ]] && [[ -s "$output_file" ]]; then
+		cp -v "$output_file" "$input_file"
+		log "${GREEN}Optimized PSI/SI metadata injection completed successfully${NC}"
 
-        tsp_cmd="$tsp_cmd -P continuity --fix -O file \"$output_file\""
+		# Enhanced verification with detailed output
+		if command -v tsanalyze >/dev/null 2>&1; then
+			log "${BLUE}Analyzing injected tables:${NC}"
+			local verification_output
+			verification_output=$(tsanalyze "$input_file" 2>/dev/null | grep -E "(EIT|SDT|TOT)" || true)
+			if [[ -n "$verification_output" ]]; then
+				echo "$verification_output"
+				if echo "$verification_output" | grep -q "EIT"; then
+					log "${GREEN}✓ EIT table detected - event information should be available${NC}"
+				else
+					log "${YELLOW}⚠ EIT table not detected in analysis${NC}"
+				fi
+				if echo "$verification_output" | grep -q "TOT"; then
+					log "${GREEN}✓ TOT table detected - time information should be available${NC}"
+				else
+					log "${YELLOW}⚠ TOT table not detected in analysis${NC}"
+				fi
+			else
+				log "${YELLOW}⚠ No PSI/SI tables detected in analysis${NC}"
+			fi
+		fi
 
-        log "${BLUE}Executing: $tsp_cmd${NC}"
-        eval "$tsp_cmd" 2>&1 | tee -a "$LOG_FILE"
-        local injection_result=${PIPESTATUS[0]}
-
-        if [[ $injection_result -ne 0 ]]; then
-            log "${RED}Error: TSDuck injection failed with exit code $injection_result${NC}"
-            return 1
-        fi
-    else
-        # Standard mode - comprehensive PSI/SI injection with standard frequencies
-        log "${BLUE}Using standard mode comprehensive PSI/SI injection${NC}"
-        local tsp_cmd="tsp --japan -I file \"$input_file\""
-
-        # PAT injection (PID 0) - replace existing
-        if [[ -f "$tables_dir/pat.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pat.bin\" --pid 0 --replace"
-        fi
-
-        # CAT injection (PID 1) - based on terrestrial TV analysis: ~10 seconds
-        if [[ -f "$tables_dir/cat.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/cat.bin\" --pid 1 --inter-packet 2500"
-        fi
-
-        # NIT injection (PID 16) - based on terrestrial TV analysis: ~1 second
-        if [[ -f "$tables_dir/nit.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/nit.bin\" --pid 16 --inter-packet 250"
-        fi
-
-        # SDT injection (PID 17) - service description (replace existing)
-        if [[ -f "$tables_dir/sdt.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/sdt.bin\" --pid 17 --replace"
-        fi
-
-        # EIT injection (PID 18) - based on terrestrial TV analysis: ~1 second
-        if [[ -f "$tables_dir/eit.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/eit.bin\" --pid 18 --inter-packet 250"
-        fi
-
-        # TOT injection (PID 20) - based on terrestrial TV analysis: ~5 seconds
-        if [[ -f "$tables_dir/tot.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/tot.bin\" --pid 20 --inter-packet 1250"
-        fi
-
-        # PMT injection (PID 257) - replace existing
-        if [[ -f "$tables_dir/pmt.bin" ]]; then
-            tsp_cmd="$tsp_cmd -P inject \"$tables_dir/pmt.bin\" --pid 257 --replace"
-        fi
-
-        tsp_cmd="$tsp_cmd -P continuity --fix -O file \"$output_file\""
-
-        log "${BLUE}Executing: $tsp_cmd${NC}"
-        if [[ -n "$LOG_FILE" ]]; then
-            eval "$tsp_cmd" 2>&1 | tee -a "$LOG_FILE"
-            local injection_result=${PIPESTATUS[0]}
-        else
-            eval "$tsp_cmd"
-            local injection_result=$?
-        fi
-
-        if [[ $injection_result -ne 0 ]]; then
-            log "${RED}Error: TSDuck injection failed with exit code $injection_result${NC}"
-            return 1
-        fi
-    fi
-
-    # Result verification
-    if [[ -f "$output_file" ]] && [[ -s "$output_file" ]]; then
-        cp -v "$output_file" "$input_file"
-        log "${GREEN}Optimized PSI/SI metadata injection completed successfully${NC}"
-
-        # Enhanced verification with detailed output
-        if command -v tsanalyze >/dev/null 2>&1; then
-            log "${BLUE}Analyzing injected tables:${NC}"
-            local verification_output
-            verification_output=$(tsanalyze "$input_file" 2>/dev/null | grep -E "(EIT|SDT|TOT)" || true)
-            if [[ -n "$verification_output" ]]; then
-                echo "$verification_output"
-                if echo "$verification_output" | grep -q "EIT"; then
-                    log "${GREEN}✓ EIT table detected - event information should be available${NC}"
-                else
-                    log "${YELLOW}⚠ EIT table not detected in analysis${NC}"
-                fi
-                if echo "$verification_output" | grep -q "TOT"; then
-                    log "${GREEN}✓ TOT table detected - time information should be available${NC}"
-                else
-                    log "${YELLOW}⚠ TOT table not detected in analysis${NC}"
-                fi
-            else
-                log "${YELLOW}⚠ No PSI/SI tables detected in analysis${NC}"
-            fi
-        fi
-
-        return 0
-    else
-        log "${RED}Error: PSI/SI metadata injection failed${NC}"
-        return 1
-    fi
+		return 0
+	else
+		log "${RED}Error: PSI/SI metadata injection failed${NC}"
+		return 1
+	fi
 }
 
 # Verify broadcast compatibility
 verify_broadcast_compatibility() {
-    local output_file="$1"
+	local output_file="$1"
 
-    log "${BLUE}Verifying broadcast compatibility${NC}"
+	log "${BLUE}Verifying broadcast compatibility${NC}"
 
-    if [[ ! -f "$output_file" ]]; then
-        log "${RED}Error: Output file not found for verification${NC}"
-        return 1
-    fi
+	if [[ ! -f "$output_file" ]]; then
+		log "${RED}Error: Output file not found for verification${NC}"
+		return 1
+	fi
 
-    # PSI/SI structure verification
-    log "${YELLOW}PSI/SI structure verification:${NC}"
-    if command -v tsanalyze >/dev/null 2>&1; then
-        local structure_check
-        structure_check=$(tsanalyze "$output_file" --japan --normalized 2>/dev/null | grep -E "pid:pid=(17|20):" | head -5 || true)
-        if [[ -n "$structure_check" ]]; then
-            echo "$structure_check"
-        else
-            log "${YELLOW}  Structure analysis: No PSI/SI tables detected${NC}"
-        fi
-    else
-        log "${YELLOW}Warning: tsanalyze not available, skipping structure check${NC}"
-    fi
+	# PSI/SI structure verification
+	log "${YELLOW}PSI/SI structure verification:${NC}"
+	if command -v tsanalyze >/dev/null 2>&1; then
+		local structure_check
+		structure_check=$(tsanalyze "$output_file" --japan --normalized 2>/dev/null | grep -E "pid:pid=(17|20):" | head -5 || true)
+		if [[ -n "$structure_check" ]]; then
+			echo "$structure_check"
+		else
+			log "${YELLOW}  Structure analysis: No PSI/SI tables detected${NC}"
+		fi
+	else
+		log "${YELLOW}Warning: tsanalyze not available, skipping structure check${NC}"
+	fi
 
-    # Detailed broadcast compatibility checks
-    log "${YELLOW}Broadcast compatibility checks:${NC}"
+	# Detailed broadcast compatibility checks
+	log "${YELLOW}Broadcast compatibility checks:${NC}"
 
-    # 1. Service information verification
-    log "${BLUE}1. Service information:${NC}"
-    if command -v tsp >/dev/null 2>&1; then
-        local service_info
-        service_info=$(tsp -I file "$output_file" -P tables --pid 17 --max 1 --text-output - -O drop 2>/dev/null | \
-            grep -E "(Service|service_name)" | head -3 || true)
-        if [[ -n "$service_info" ]]; then
-            echo "$service_info"
-        else
-            log "${YELLOW}  Service info: Not detected${NC}"
-        fi
-    fi
+	# 1. Service information verification
+	log "${BLUE}1. Service information:${NC}"
+	if command -v tsp >/dev/null 2>&1; then
+		local service_info
+		service_info=$(tsp -I file "$output_file" -P tables --pid 17 --max 1 --text-output - -O drop 2>/dev/null | \
+			grep -E "(Service|service_name)" | head -3 || true)
+		if [[ -n "$service_info" ]]; then
+			echo "$service_info"
+		else
+			log "${YELLOW}  Service info: Not detected${NC}"
+		fi
+	fi
 
-    # 2. Time information verification
-    log "${BLUE}2. Time information:${NC}"
-    if command -v tsp >/dev/null 2>&1; then
-        local time_info
-        time_info=$(tsp -I file "$output_file" -P tables --pid 20 --max 1 --text-output - -O drop 2>/dev/null | \
-            grep -E "(TOT|UTC_time)" | head -2 || true)
-        if [[ -n "$time_info" ]]; then
-            echo "$time_info"
-        else
-            log "${YELLOW}  Time info: Not detected${NC}"
-        fi
-    fi
+	# 2. Time information verification
+	log "${BLUE}2. Time information:${NC}"
+	if command -v tsp >/dev/null 2>&1; then
+		local time_info
+		time_info=$(tsp -I file "$output_file" -P tables --pid 20 --max 1 --text-output - -O drop 2>/dev/null | \
+			grep -E "(TOT|UTC_time)" | head -2 || true)
+		if [[ -n "$time_info" ]]; then
+			echo "$time_info"
+		else
+			log "${YELLOW}  Time info: Not detected${NC}"
+		fi
+	fi
 
-    # 3. Event information verification
-    log "${BLUE}3. Event information:${NC}"
-    if command -v tsp >/dev/null 2>&1; then
-        local event_info
-        event_info=$(tsp -I file "$output_file" -P tables --pid 18 --max 1 --text-output - -O drop 2>/dev/null | \
-            grep -E "(Event|event_name)" | head -3 || true)
-        if [[ -n "$event_info" ]]; then
-            echo "$event_info"
-        else
-            log "${YELLOW}  Event info: Not detected${NC}"
-        fi
-    fi
+	# 3. Event information verification
+	log "${BLUE}3. Event information:${NC}"
+	if command -v tsp >/dev/null 2>&1; then
+		local event_info
+		event_info=$(tsp -I file "$output_file" -P tables --pid 18 --max 1 --text-output - -O drop 2>/dev/null | \
+			grep -E "(Event|event_name)" | head -3 || true)
+		if [[ -n "$event_info" ]]; then
+			echo "$event_info"
+		else
+			log "${YELLOW}  Event info: Not detected${NC}"
+		fi
+	fi
 
-    # Broadcast verification procedure
-    log "${GREEN}Broadcast verification procedure:${NC}"
-    log "${GREEN}  1. Check PSI/SI metadata injection${NC}"
-    log "${GREEN}  2. Verify service information display${NC}"
-    log "${GREEN}  3. Confirm the following are included:${NC}"
-    log "${GREEN}     ✅ Genre information${NC}"
-    log "${GREEN}     ✅ Resolution information${NC}"
-    log "${GREEN}     ✅ Service name: ${CONFIG[BROADCAST_SERVICE_NAME]}${NC}"
-    log "${GREEN}     ✅ Start time: ${CONFIG[BROADCAST_START_TIME]}${NC}"
+	# Broadcast verification procedure
+	log "${GREEN}Broadcast verification procedure:${NC}"
+	log "${GREEN}  1. Check PSI/SI metadata injection${NC}"
+	log "${GREEN}  2. Verify service information display${NC}"
+	log "${GREEN}  3. Confirm the following are included:${NC}"
+	log "${GREEN}     ✅ Genre information${NC}"
+	log "${GREEN}     ✅ Resolution information${NC}"
+	log "${GREEN}     ✅ Service name: ${CONFIG[BROADCAST_SERVICE_NAME]}${NC}"
+	log "${GREEN}     ✅ Start time: ${CONFIG[BROADCAST_START_TIME]}${NC}"
 
-    return 0
+	return 0
 }
 
 # Move final output from temp to output directory
 move_final_output() {
-    log "${BLUE}Moving final output to destination${NC}"
+	log "${BLUE}Moving final output to destination${NC}"
 
-    mkdir -p "$OUTPUT_DIR"
+	mkdir -p "$OUTPUT_DIR"
 
-    local temp_file="$TEMP_DIR/$FINAL_OUTPUT"
-    local output_file="$OUTPUT_DIR/$FINAL_OUTPUT"
+	local temp_file="$TEMP_DIR/$FINAL_OUTPUT"
+	local output_file="$OUTPUT_DIR/$FINAL_OUTPUT"
 
-    if [[ ! -f "$temp_file" ]]; then
-        log "${RED}Error: Final output file $temp_file not found${NC}"
-        return 1
-    fi
+	if [[ ! -f "$temp_file" ]]; then
+		log "${RED}Error: Final output file $temp_file not found${NC}"
+		return 1
+	fi
 
-    # Move the final file to output directory
-    mv "$temp_file" "$output_file"
+	# Move the final file to output directory
+	mv "$temp_file" "$output_file"
 
-    if [[ -f "$output_file" ]]; then
-        local file_size
-        file_size=$(stat -c%s "$output_file" 2>/dev/null | numfmt --to=iec || echo "unknown")
-        local eit_status=""
-        if [[ "$INJECT_EIT" == true ]]; then
-            eit_status=" (with EIT metadata)"
-        fi
-        log "${GREEN}Final output ready: $output_file$eit_status ($file_size)${NC}"
-        return 0
-    else
-        log "${RED}Error: Failed to move final output${NC}"
-        return 1
-    fi
+	if [[ -f "$output_file" ]]; then
+		local file_size
+		file_size=$(stat -c%s "$output_file" 2>/dev/null | numfmt --to=iec || echo "unknown")
+		log "${GREEN}Final output ready: $output_file(with EIT metadata) ($file_size)${NC}"
+		return 0
+	else
+		log "${RED}Error: Failed to move final output${NC}"
+		return 1
+	fi
 }
 
 # Generate report
 generate_report() {
-    log "${BLUE}Generating report${NC}"
+	log "${BLUE}Generating report${NC}"
 
-    local report_file="$OUTPUT_DIR/generation_report.txt"
-    local csv_file="$OUTPUT_DIR/segment_structure.csv"
+	local report_file="$OUTPUT_DIR/generation_report.txt"
+	local csv_file="$OUTPUT_DIR/segment_structure.csv"
 
-    {
-        echo "Japanese TV Content Generator Report"
-        echo "=========================="
-        echo "Generated: $(date)"
-        echo "Configuration: $CONFIG_FILE"
-        local eit_note=""
-        if [[ "$INJECT_EIT" == true ]]; then
-            eit_note=" (with EIT metadata)"
-        fi
-        echo "Output: $OUTPUT_DIR/$FINAL_OUTPUT $eit_note"
-        echo ""
-        echo "Technical Specifications:"
-        echo "- Video:             ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} 16:9 ${CONFIG[FRAME_RATE]}fps"
-        echo "- Video Codec:       ${CONFIG[VIDEO_CODEC]} avg ${CONFIG[VIDEO_BITRATE_AVG]}"
-        echo "- Audio:             ${CONFIG[AUDIO_SAMPLE_RATE]}Hz ${CONFIG[AUDIO_CHANNELS]}ch ${CONFIG[AUDIO_BITRATE]}"
-        echo "- Audio Levels:      0VU=-14dBFS, Silence<-70dBFS"
-        echo ""
-        echo "Broadcast Metadata:"
-        echo "- Service ID:        ${CONFIG[BROADCAST_SERVICE_ID]}"
-        echo "- Transport Stream:  ${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
-        echo "- Original Network:  ${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}"
-        echo "- Service Name:      \"${CONFIG[BROADCAST_SERVICE_NAME]}\""
-        echo "- Service Provider:  \"${CONFIG[BROADCAST_SERVICE_PROVIDER]}\""
-        echo "- Network Name:      \"${CONFIG[BROADCAST_NETWORK_NAME]}\""
-        if [[ "$INJECT_EIT" == true ]]; then
-            echo "- EIT Start Time:    ${CONFIG[BROADCAST_START_TIME]}"
-            echo "- EIT Status:        Present/Following enabled"
-        else
-            echo "- EIT Status:        Disabled (--skip-eit specified)"
-        fi
-        echo ""
-        echo "EIT/SDT/TOT Metadata Files:"
-        if [[ -f "$TEMP_DIR/eit.xml" ]]; then
-            echo "- EIT (Event Information Table):     Generated"
-            echo "  File: $TEMP_DIR/eit.xml"
-            if [[ "$INJECT_EIT" == true ]]; then
-                echo "  Status: Injected into final output"
-            else
-                echo "  Status: Generated but not injected (--skip-eit)"
-            fi
-        else
-            echo "- EIT (Event Information Table):     Not generated"
-        fi
-        if [[ -f "$TEMP_DIR/sdt.xml" ]]; then
-            echo "- SDT (Service Description Table):   Generated"
-            echo "  File: $TEMP_DIR/sdt.xml"
-            echo "  Status: Injected into final output"
-        else
-            echo "- SDT (Service Description Table):   Not generated"
-        fi
-        if [[ -f "$TEMP_DIR/tot.xml" ]]; then
-            echo "- TOT (Time Offset Table):           Generated"
-            echo "  File: $TEMP_DIR/tot.xml"
-            echo "  Status: Injected into final output"
-        else
-            echo "- TOT (Time Offset Table):           Not generated"
-        fi
-        echo ""
-        echo "Segment Structure:"
-        local segment_count=0
-        for segment_data in "${SEGMENTS[@]}"; do
-            IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
-            [[ "$type" == "RecMargin" ]] && continue
-            local frame_duration=$((end_frame - start_frame + 1))
-            local time_duration
-            time_duration=$(calculate_duration "$start_frame" $((end_frame + 1)))
-            printf "  %2d. %-12s: %5d frames (%7.3fs)\n" $((++segment_count)) "$name" "$frame_duration" "$time_duration"
-        done
-    } > "$report_file"
+	{
+		echo "Japanese TV Content Generator Report"
+		echo "=========================="
+		echo "Generated: $(date)"
+		echo "Configuration: $CONFIG_FILE"
+		echo "Output: $OUTPUT_DIR/$FINAL_OUTPUT (with EIT metadata)"
+		echo ""
+		echo "Technical Specifications:"
+		echo "- Video:             ${CONFIG[VIDEO_WIDTH]}x${CONFIG[VIDEO_HEIGHT]} 16:9 ${CONFIG[FRAME_RATE]}fps"
+		echo "- Video Codec:       ${CONFIG[VIDEO_CODEC]} avg ${CONFIG[VIDEO_BITRATE_AVG]}"
+		echo "- Audio:             ${CONFIG[AUDIO_SAMPLE_RATE]}Hz ${CONFIG[AUDIO_CHANNELS]}ch ${CONFIG[AUDIO_BITRATE]}"
+		echo "- Audio Levels:      0VU=-14dBFS, Silence<-70dBFS"
+		echo ""
+		echo "Broadcast Metadata:"
+		echo "- Service ID:        ${CONFIG[BROADCAST_SERVICE_ID]}"
+		echo "- Transport Stream:  ${CONFIG[BROADCAST_TRANSPORT_STREAM_ID]}"
+		echo "- Original Network:  ${CONFIG[BROADCAST_ORIGINAL_NETWORK_ID]}"
+		echo "- Service Name:      \"${CONFIG[BROADCAST_SERVICE_NAME]}\""
+		echo "- Service Provider:  \"${CONFIG[BROADCAST_SERVICE_PROVIDER]}\""
+		echo "- Network Name:      \"${CONFIG[BROADCAST_NETWORK_NAME]}\""
+		echo "- EIT Start Time:    ${CONFIG[BROADCAST_START_TIME]}"
+		echo "- EIT Status:        Present/Following enabled"
+		echo ""
+		echo "EIT/SDT/TOT Metadata Files:"
+		if [[ -f "$TEMP_DIR/eit.xml" ]]; then
+			echo "- EIT (Event Information Table):     Generated"
+			echo "  File: $TEMP_DIR/eit.xml"
+			echo "  Status: Injected into final output"
+		else
+			echo "- EIT (Event Information Table):     Not generated"
+		fi
+		if [[ -f "$TEMP_DIR/sdt.xml" ]]; then
+			echo "- SDT (Service Description Table):   Generated"
+			echo "  File: $TEMP_DIR/sdt.xml"
+			echo "  Status: Injected into final output"
+		else
+			echo "- SDT (Service Description Table):   Not generated"
+		fi
+		if [[ -f "$TEMP_DIR/tot.xml" ]]; then
+			echo "- TOT (Time Offset Table):           Generated"
+			echo "  File: $TEMP_DIR/tot.xml"
+			echo "  Status: Injected into final output"
+		else
+			echo "- TOT (Time Offset Table):           Not generated"
+		fi
+		echo ""
+		echo "Segment Structure:"
+		local segment_count=0
+		for segment_data in "${SEGMENTS[@]}"; do
+			IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+			[[ "$type" == "RecMargin" ]] && continue
+			local frame_duration=$((end_frame - start_frame + 1))
+			local time_duration
+			time_duration=$(calculate_duration "$start_frame" $((end_frame + 1)))
+			printf "  %2d. %-12s: %5d frames (%7.3fs)\n" $((++segment_count)) "$name" "$frame_duration" "$time_duration"
+		done
+	} > "$report_file"
 
-    # CSV for external processing
-    echo "Segment,Type,StartFrame,EndFrame,Duration_Frames,Duration_Seconds" > "$csv_file"
-    segment_count=0
-    for segment_data in "${SEGMENTS[@]}"; do
-        IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
-        [[ "$type" == "RecMargin" ]] && continue
-        local frame_duration=$((end_frame - start_frame + 1))
-        local time_duration
-        time_duration=$(calculate_duration "$start_frame" $((end_frame + 1)))
-        echo "$name,$type,$start_frame,$end_frame,$frame_duration,$time_duration" >> "$csv_file"
-        segment_count=$((segment_count + 1))
-    done
+	# CSV for external processing
+	echo "Segment,Type,StartFrame,EndFrame,Duration_Frames,Duration_Seconds" > "$csv_file"
+	segment_count=0
+	for segment_data in "${SEGMENTS[@]}"; do
+		IFS=',' read -r type name start_frame end_frame <<< "$segment_data"
+		[[ "$type" == "RecMargin" ]] && continue
+		local frame_duration=$((end_frame - start_frame + 1))
+		local time_duration
+		time_duration=$(calculate_duration "$start_frame" $((end_frame + 1)))
+		echo "$name,$type,$start_frame,$end_frame,$frame_duration,$time_duration" >> "$csv_file"
+		segment_count=$((segment_count + 1))
+	done
 
-    log "${GREEN}Report generated: $report_file${NC}"
-    log "${GREEN}CSV structure: $csv_file${NC}"
+	log "${GREEN}Report generated: $report_file${NC}"
+	log "${GREEN}CSV structure: $csv_file${NC}"
 }
 
 # Cleanup temporary files
 cleanup() {
-    if [[ "$DEBUG" == true ]] || [[ "${1:-}" == "keep" ]]; then
-        log "${YELLOW}Keeping temporary files in $TEMP_DIR (debug mode)${NC}"
-    else
-        log "${BLUE}Cleaning up temporary files${NC}"
-        rm -rf "$TEMP_DIR"
-    fi
+	if [[ "$DEBUG" == true ]] || [[ "${1:-}" == "keep" ]]; then
+		log "${YELLOW}Keeping temporary files in $TEMP_DIR (debug mode)${NC}"
+	else
+		log "${BLUE}Cleaning up temporary files${NC}"
+		rm -rf "$TEMP_DIR"
+	fi
 }
 
 # Check system dependencies and ffmpeg capabilities
 check_dependencies() {
-    log "${BLUE}Checking system dependencies and capabilities${NC}"
+	log "${BLUE}Checking system dependencies and capabilities${NC}"
 
-    local missing_deps=()
-    local ffmpeg_issues=()
+	local missing_deps=()
+	local ffmpeg_issues=()
 
-    # Check basic commands
-    local required_commands=("ffmpeg" "ffprobe" "bc" "grep" "awk" "md5sum" "jq")
-    for cmd in "${required_commands[@]}"; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            missing_deps+=("$cmd")
-        fi
-    done
+	# Check basic commands
+	local required_commands=("ffmpeg" "ffprobe" "bc" "grep" "awk" "md5sum" "jq")
+	for cmd in "${required_commands[@]}"; do
+		if ! command -v "$cmd" >/dev/null 2>&1; then
+			missing_deps+=("$cmd")
+		fi
+	done
 
-    # Check TSDuck if EIT injection is enabled (default)
-    if [[ "$INJECT_EIT" == true ]]; then
-        if ! command -v "tsp" >/dev/null 2>&1; then
-            log "${RED}Error: TSDuck is required but not found.${NC}"
-            show_tsduck_install_instructions
-            exit 1
-        else
-            # Check TSDuck version (require 3.41+)
-            local tsduck_version
-            tsduck_version=$(tsp --version 2>&1 | head -1 | grep -o '[0-9]\+\.[0-9]\+' | head -1)
-            if [[ -n "$tsduck_version" ]]; then
-                local version_check
-                version_check=$(echo "$tsduck_version >= 3.41" | bc 2>/dev/null)
-                if [[ "$version_check" != "1" ]]; then
-                    log "${RED}Error: TSDuck version $tsduck_version is too old. Version 3.41 or higher is required.${NC}"
-                    show_tsduck_install_instructions
-                    exit 1
-                fi
-            else
-                log "${YELLOW}Warning: Could not determine TSDuck version. Proceeding anyway...${NC}"
-            fi
-        fi
-    fi
+	# Check TSDuck if EIT injection is enabled (default)
+	if ! command -v "tsp" >/dev/null 2>&1; then
+		log "${RED}Error: TSDuck is required but not found.${NC}"
+		show_tsduck_install_instructions
+		exit 1
+	else
+		# Check TSDuck version (require 3.41+)
+		local tsduck_version
+		tsduck_version=$(tsp --version 2>&1 | head -1 | grep -o '[0-9]\+\.[0-9]\+' | head -1)
+		if [[ -n "$tsduck_version" ]]; then
+			local version_check
+			version_check=$(echo "$tsduck_version >= 3.41" | bc 2>/dev/null)
+			if [[ "$version_check" != "1" ]]; then
+				log "${RED}Error: TSDuck version $tsduck_version is too old. Version 3.41 or higher is required.${NC}"
+				show_tsduck_install_instructions
+				exit 1
+			fi
+		else
+			log "${YELLOW}Warning: Could not determine TSDuck version. Proceeding anyway...${NC}"
+		fi
+	fi
 
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        log "${RED}Error: Missing required commands: ${missing_deps[*]}${NC}"
-        log "${YELLOW}Please install the missing dependencies:${NC}"
-        for dep in "${missing_deps[@]}"; do
-            case "$dep" in
-                "ffmpeg"|"ffprobe") log "  - FFmpeg: https://ffmpeg.org/download.html" ;;
-                "bc") log "  - bc: sudo apt-get install bc (Ubuntu/Debian) or brew install bc (macOS)" ;;
-                "jq") log "  - jq: sudo apt-get install jq (Ubuntu/Debian) or brew install jq (macOS)" ;;
-                "tsp (TSDuck)") log "  - TSDuck: https://tsduck.io/download/tsduck/" ;;
-                *) log "  - $dep: available in most standard Unix environments" ;;
-            esac
-        done
-        exit 1
-    fi
+	if [[ ${#missing_deps[@]} -gt 0 ]]; then
+		log "${RED}Error: Missing required commands: ${missing_deps[*]}${NC}"
+		log "${YELLOW}Please install the missing dependencies:${NC}"
+		for dep in "${missing_deps[@]}"; do
+			case "$dep" in
+				"ffmpeg"|"ffprobe") log "  - FFmpeg: https://ffmpeg.org/download.html" ;;
+				"bc") log "  - bc: sudo apt-get install bc (Ubuntu/Debian) or brew install bc (macOS)" ;;
+				"jq") log "  - jq: sudo apt-get install jq (Ubuntu/Debian) or brew install jq (macOS)" ;;
+				"tsp (TSDuck)") log "  - TSDuck: https://tsduck.io/download/tsduck/" ;;
+				*) log "  - $dep: available in most standard Unix environments" ;;
+			esac
+		done
+		exit 1
+	fi
 
-    # Check FFmpeg capabilities
-    log "${BLUE}Verifying FFmpeg codec and filter support${NC}"
+	# Check FFmpeg capabilities
+	log "${BLUE}Verifying FFmpeg codec and filter support${NC}"
 
-    # Basic FFmpeg functionality test
-    if ! ffmpeg -f lavfi -i "testsrc=size=320x240:duration=1" -t 1 -f null - 2>/dev/null; then
-        ffmpeg_issues+=("FFmpeg basic video generation not working")
-    fi
+	# Basic FFmpeg functionality test
+	if ! ffmpeg -f lavfi -i "testsrc=size=320x240:duration=1" -t 1 -f null - 2>/dev/null; then
+		ffmpeg_issues+=("FFmpeg basic video generation not working")
+	fi
 
 
-    # Essential capability warnings (non-fatal)
-    local warnings=()
+	# Essential capability warnings (non-fatal)
+	local warnings=()
 
-    if ! ffmpeg -codecs 2>/dev/null | grep -qi "mpeg2"; then
-        warnings+=("MPEG-2 video codec")
-    fi
+	if ! ffmpeg -codecs 2>/dev/null | grep -qi "mpeg2"; then
+		warnings+=("MPEG-2 video codec")
+	fi
 
-    if ! ffmpeg -codecs 2>/dev/null | grep -qi "aac"; then
-        warnings+=("AAC audio codec")
-    fi
+	if ! ffmpeg -codecs 2>/dev/null | grep -qi "aac"; then
+		warnings+=("AAC audio codec")
+	fi
 
-    if ! ffmpeg -filters 2>/dev/null | grep -qi "drawtext"; then
-        warnings+=("drawtext filter for text overlay")
-    fi
+	if ! ffmpeg -filters 2>/dev/null | grep -qi "drawtext"; then
+		warnings+=("drawtext filter for text overlay")
+	fi
 
-    # Check Ubuntu font for optimal text rendering
-    if ! fc-list | grep -qi "ubuntu.*bold" && ! dpkg -l | grep -qi "fonts-ubuntu"; then
-        warnings+=("Ubuntu font (install with: sudo apt install fonts-ubuntu)")
-    fi
+	# Check Ubuntu font for optimal text rendering
+	if ! fc-list | grep -qi "ubuntu.*bold" && ! dpkg -l | grep -qi "fonts-ubuntu"; then
+		warnings+=("Ubuntu font (install with: sudo apt install fonts-ubuntu)")
+	fi
 
-    if ! ffmpeg -muxers 2>/dev/null | grep -qi "mpegts"; then
-        warnings+=("MPEG-TS muxer")
-    fi
+	if ! ffmpeg -muxers 2>/dev/null | grep -qi "mpegts"; then
+		warnings+=("MPEG-TS muxer")
+	fi
 
-    if [[ ${#warnings[@]} -gt 0 ]]; then
-        log "${YELLOW}Warnings - Some features may be limited:${NC}"
-        for warning in "${warnings[@]}"; do
-            log "${YELLOW}  - $warning may not be available${NC}"
-        done
-        log "${YELLOW}Script will attempt to run with available codecs/filters${NC}"
-    fi
+	if [[ ${#warnings[@]} -gt 0 ]]; then
+		log "${YELLOW}Warnings - Some features may be limited:${NC}"
+		for warning in "${warnings[@]}"; do
+			log "${YELLOW}  - $warning may not be available${NC}"
+		done
+		log "${YELLOW}Script will attempt to run with available codecs/filters${NC}"
+	fi
 
-    if [[ ${#ffmpeg_issues[@]} -gt 0 ]]; then
-        log "${RED}Error: FFmpeg configuration issues detected:${NC}"
-        for issue in "${ffmpeg_issues[@]}"; do
-            log "${RED}  - $issue${NC}"
-        done
-        log "${YELLOW}Please install a complete FFmpeg build with all required codecs and filters.${NC}"
-        log "${YELLOW}Recommended: Use official FFmpeg builds or install via package manager.${NC}"
-        exit 1
-    fi
+	if [[ ${#ffmpeg_issues[@]} -gt 0 ]]; then
+		log "${RED}Error: FFmpeg configuration issues detected:${NC}"
+		for issue in "${ffmpeg_issues[@]}"; do
+			log "${RED}  - $issue${NC}"
+		done
+		log "${YELLOW}Please install a complete FFmpeg build with all required codecs and filters.${NC}"
+		log "${YELLOW}Recommended: Use official FFmpeg builds or install via package manager.${NC}"
+		exit 1
+	fi
 
-    # Display FFmpeg version info
-    local ffmpeg_version
-    ffmpeg_version=$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f3)
-    log "${GREEN}✓ All dependencies available${NC}"
-    log "${GREEN}✓ FFmpeg version: $ffmpeg_version${NC}"
-    log "${GREEN}✓ All required codecs and filters available${NC}"
+	# Display FFmpeg version info
+	local ffmpeg_version
+	ffmpeg_version=$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f3)
+	log "${GREEN}✓ All dependencies available${NC}"
+	log "${GREEN}✓ FFmpeg version: $ffmpeg_version${NC}"
+	log "${GREEN}✓ All required codecs and filters available${NC}"
 }
 
 # Main execution
 main() {
-    log "${GREEN}=== JTV Gen Started ===${NC}"
-    log "Timestamp: $(date)"
+	log "${GREEN}=== JTV Gen Started ===${NC}"
+	log "Timestamp: $(date)"
 
-    # Check dependencies first
-    check_dependencies
+	# Check dependencies first
+	check_dependencies
 
-    # Initialize log
-    : > "$LOG_FILE"
+	# Initialize log
+	: > "$LOG_FILE"
 
-    # Process
-    load_config
+	# Process
+	load_config
 
-    # Pre-generate directories
-    log "${BLUE}Preparing temporary directories${NC}"
-    mkdir -p "$TEMP_DIR"
-    # Logo generation no longer needed - using direct drawtext rendering
+	# Pre-generate directories
+	log "${BLUE}Preparing temporary directories${NC}"
+	mkdir -p "$TEMP_DIR"
+	# Logo generation no longer needed - using direct drawtext rendering
 
-    generate_metadata_files
-    preview_segments
-    generate_segments
-    concatenate_segments
-    inject_eit_metadata
-    move_final_output
-    generate_report
+	generate_metadata_files
+	preview_segments
+	generate_segments
+	concatenate_segments
+	inject_eit_metadata
+	move_final_output
+	generate_report
 
-    # Enhanced verification with broadcast compatibility check
-    local final_output_path="$OUTPUT_DIR/$FINAL_OUTPUT"
-    if [[ -f "$final_output_path" ]]; then
-        log "${BLUE}Technical verification:${NC}"
-        ffprobe -v quiet -print_format json -show_format "$final_output_path" 2>/dev/null | \
-            jq -r '.format | "Duration: \(.duration)s, Size: \(.size) bytes, Bitrate: \(.bit_rate) bps"' 2>/dev/null || \
-            ffprobe -v error -show_entries format=duration,size,bit_rate -of csv=p=0 "$final_output_path"
+	# Enhanced verification with broadcast compatibility check
+	local final_output_path="$OUTPUT_DIR/$FINAL_OUTPUT"
+	if [[ -f "$final_output_path" ]]; then
+		log "${BLUE}Technical verification:${NC}"
+		ffprobe -v quiet -print_format json -show_format "$final_output_path" 2>/dev/null | \
+			jq -r '.format | "Duration: \(.duration)s, Size: \(.size) bytes, Bitrate: \(.bit_rate) bps"' 2>/dev/null || \
+			ffprobe -v error -show_entries format=duration,size,bit_rate -of csv=p=0 "$final_output_path"
 
-        # Run broadcast compatibility verification
-        verify_broadcast_compatibility "$final_output_path"
-    fi
+		# Run broadcast compatibility verification
+		verify_broadcast_compatibility "$final_output_path"
+	fi
 
-    cleanup "${1:-}"
-    log "${GREEN}=== JTV Gen Completed ===${NC}"
+	cleanup "${1:-}"
+	log "${GREEN}=== JTV Gen Completed ===${NC}"
 }
 
 # Script execution
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+	main "$@"
 fi
