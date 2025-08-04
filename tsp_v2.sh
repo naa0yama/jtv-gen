@@ -209,20 +209,21 @@ tstabcomp --japan "${WORKDIR}/tot.xml" -o "${WORKDIR}/tot.bin"
 tstabcomp --japan "${WORKDIR}/pmt.xml" -o "${WORKDIR}/pmt.bin"
 
 #- -----------------------------------------------------------------------------
-# Global PID's                          PID                kbps
-#   PAT (Program Association Table)  0x0000(0)    replace  15.0
-#   NIT (Network Information Table)  0x0010(16)   inject    1.5
-#   SDT (Service Description Table)  0x0011(17)   replace   0.7
-#   EIT (Event Information Table)    0x0012(18)   inject   15.0
-#   TOT (Time Offset Table)          0x0014(20)   inject    0.3
+# Global PID's                          PID         Inject/Replace
+#   PAT (Program Association Table)  0x0000(  0)    replace
+#   NIT (Network Information Table)  0x0010( 16)    inject
+#   SDT (Service Description Table)  0x0011( 17)    replace
+#   EIT (Event Information Table)    0x0012( 18)    inject
+#   TOT (Time Offset Table)          0x0014( 20)    inject
 # Service  PID's
-#   PMT (Program Map Table)          0x0101(257)  replace  30.0
+#   PMT (Program Map Table)          0x0101(257)    replace
 #   MPEG-2 Video                     0x0111(273)
 #   MPEG-2 AAC Audio                 0x0112(274)
-# PAT/NIT/SDT/EIT/TOT/PMT SUM                     62.5 kbps (3.7MB/min)
+# PAT/NIT/SDT/EIT/TOT/PMT SUM                    64 kbps (3.84MB/min)
 # --inter-packet 250   #  250 * 4ms ≈ 1s
+
 echo "Injecting basic PSI/SI metadata..."
-tsp --japan --add-input-stuffing 1/10 \
+tsp --japan --add-input-stuffing 1/25 \
     -I file "${WORKDIR}/combined.ts" \
     -P inject "${WORKDIR}/pat.bin" --pid 0 --replace \
     -P inject "${WORKDIR}/nit.bin" --pid 16 --inter-packet $((  1000/4 )) \
