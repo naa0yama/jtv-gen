@@ -31,7 +31,7 @@ JTV Gen は、日本のテレビ放送規格に準拠した MPEG-TS 形式のダ
 - **FFmpeg** - MPEG-2 および AAC エンコーディング対応
 - **TSDuck** - PSI/SI メタデータ注入用（3.41 以降）
 - **bc** - 持続時間計算用
-- **標準 Unix ツール** - grep, awk, md5sum, jq など
+- **Unix ツール** - grep, awk, md5sum, jq など
 
 ## インストール
 
