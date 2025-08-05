@@ -347,7 +347,7 @@ CM,CM2-6,9889,10338
 CM,CM2-7,10339,10793
 EOF
 		fi
-		log "${YELLOW}Warning: Configuration file $CONFIG_FILE defualt created${NC}"
+		log "${YELLOW}Warning: configuration file $CONFIG_FILE defualt created${NC}"
 	fi
 
 	# Default variables
@@ -1451,7 +1451,7 @@ check_dependencies() {
 	local ffmpeg_issues=()
 
 	# Check basic commands
-	local required_commands=("ffmpeg" "ffprobe" "bc" "grep" "awk" "md5sum" "jq")
+	local required_commands=("awk" "bc" "ffmpeg" "ffprobe" "grep" "jq" "md5sum")
 	for cmd in "${required_commands[@]}"; do
 		if ! command -v "$cmd" >/dev/null 2>&1; then
 			missing_deps+=("$cmd")
@@ -1485,11 +1485,11 @@ check_dependencies() {
 		log "${YELLOW}Please install the missing dependencies:${NC}"
 		for dep in "${missing_deps[@]}"; do
 			case "$dep" in
-				"ffmpeg"|"ffprobe") log "  - FFmpeg: https://ffmpeg.org/download.html" ;;
-				"bc") log "  - bc: sudo apt-get install bc (Ubuntu/Debian) or brew install bc (macOS)" ;;
-				"jq") log "  - jq: sudo apt-get install jq (Ubuntu/Debian) or brew install jq (macOS)" ;;
-				"tsp (TSDuck)") log "  - TSDuck: https://tsduck.io/download/tsduck/" ;;
-				*) log "  - $dep: available in most standard Unix environments" ;;
+				"bc")				log "  - bc: sudo apt-get install bc (Ubuntu/Debian)" ;;
+				"ffmpeg"|"ffprobe")	log "  - FFmpeg: https://ffmpeg.org/download.html" ;;
+				"jq")				log "  - jq: sudo apt-get install jq (Ubuntu/Debian)" ;;
+				"tsp (TSDuck)")		log "  - TSDuck: https://tsduck.io/download/tsduck/" ;;
+				*)					log "  - $dep: available in most standard Unix environments" ;;
 			esac
 		done
 		exit 1
@@ -1504,36 +1504,52 @@ check_dependencies() {
 	fi
 
 
-	# Essential capability warnings (non-fatal)
+	# Essential capabilities check
 	local warnings=()
 
-	if ! ffmpeg -codecs 2>/dev/null | grep -qi "mpeg2"; then
+	# Test MPEG-2 video codec
+	local mpeg2_check
+	mpeg2_check=$(ffmpeg -hide_banner -codecs 2>&1 | grep -i "mpeg2video" || true)
+	if [[ -z "$mpeg2_check" ]]; then
 		warnings+=("MPEG-2 video codec")
 	fi
 
-	if ! ffmpeg -codecs 2>/dev/null | grep -qi "aac"; then
+	# Test AAC audio codec
+	local aac_check
+	aac_check=$(ffmpeg -hide_banner -codecs 2>&1 | grep -i "aac" || true)
+	if [[ -z "$aac_check" ]]; then
 		warnings+=("AAC audio codec")
 	fi
 
-	if ! ffmpeg -filters 2>/dev/null | grep -qi "drawtext"; then
+	# Test drawtext filter
+	local drawtext_check
+	drawtext_check=$(ffmpeg -hide_banner -filters 2>&1 | grep -i "drawtext" || true)
+	if [[ -z "$drawtext_check" ]]; then
 		warnings+=("drawtext filter for text overlay")
 	fi
 
-	# Check Ubuntu font for optimal text rendering
-	if ! fc-list | grep -qi "ubuntu.*bold" && ! dpkg -l | grep -qi "fonts-ubuntu"; then
-		warnings+=("Ubuntu font (install with: sudo apt install fonts-ubuntu)")
-	fi
-
-	if ! ffmpeg -muxers 2>/dev/null | grep -qi "mpegts"; then
+	# Test MPEG-TS muxer
+	local mpegts_check
+	mpegts_check=$(ffmpeg -hide_banner -muxers 2>&1 | grep -i "mpegts" || true)
+	if [[ -z "$mpegts_check" ]]; then
 		warnings+=("MPEG-TS muxer")
 	fi
 
+	# Check Ubuntu font for optimal text rendering
+	# Use dpkg only - it's more reliable than fc-list which can be unstable after interruption
+	local font_check
+	font_check=$(dpkg -l 2>/dev/null | grep -i "fonts-ubuntu" || true)
+	if [[ -z "$font_check" ]]; then
+		warnings+=("Ubuntu font (install with: sudo apt install fonts-ubuntu)")
+	fi
+
 	if [[ ${#warnings[@]} -gt 0 ]]; then
-		log "${YELLOW}Warnings - Some features may be limited:${NC}"
+		log "${RED}Error: Critical dependencies missing:${NC}"
 		for warning in "${warnings[@]}"; do
-			log "${YELLOW}  - $warning may not be available${NC}"
+			log "${RED}  - $warning${NC}"
 		done
-		log "${YELLOW}Script will attempt to run with available codecs/filters${NC}"
+		log "${RED}Please install missing dependencies before running the script.${NC}"
+		exit 1
 	fi
 
 	if [[ ${#ffmpeg_issues[@]} -gt 0 ]]; then
@@ -1551,6 +1567,7 @@ check_dependencies() {
 	ffmpeg_version=$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f3)
 	log "${GREEN}✓ All dependencies available${NC}"
 	log "${GREEN}✓ FFmpeg version: $ffmpeg_version${NC}"
+	log "${GREEN}✓ TSDuck version: $tsduck_version${NC}"
 	log "${GREEN}✓ All required codecs and filters available${NC}"
 }
 
